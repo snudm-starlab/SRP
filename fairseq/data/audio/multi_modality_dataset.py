@@ -200,8 +200,6 @@ class LangPairMaskDataset(FairseqDataset):
         return self.dataset.sizes
 
     def get_batch_shapes(self):
-        if hasattr(self.dataset, "get_batch_shapes"):
-            return self.dataset.get_batch_shapes()
         return self.dataset.buckets
 
     def num_tokens_vec(self, indices):
