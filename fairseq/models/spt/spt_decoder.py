@@ -13,7 +13,7 @@ from torch import Tensor
 from fairseq import utils
 from fairseq.distributed import fsdp_wrap
 from fairseq.models import FairseqIncrementalDecoder
-from fairseq.models.linformer import LinformerConfig
+from fairseq.models.spt import SPTConfig
 from fairseq.modules import (
     AdaptiveSoftmax,
     BaseLayer,
@@ -22,7 +22,7 @@ from fairseq.modules import (
     LayerNorm,
     PositionalEmbedding,
     SinusoidalPositionalEmbedding,
-    linformer_layer,
+    spt_layer,
 )
 from fairseq.modules.checkpoint_activations import checkpoint_wrapper
 from fairseq.modules.quant_noise import quant_noise as apply_quant_noise_
@@ -30,16 +30,16 @@ from fairseq.modules.quant_noise import quant_noise as apply_quant_noise_
 
 # rewrite name for backward compatibility in `make_generation_fast_`
 def module_name_fordropout(module_name: str) -> str:
-    if module_name == "LinformerDecoderBase":
-        return "LinformerDecoder"
+    if module_name == "SPTDecoderBase":
+        return "SPTDecoder"
     else:
         return module_name
 
 
-class LinformerDecoderBase(FairseqIncrementalDecoder):
+class SPTDecoderBase(FairseqIncrementalDecoder):
     """
-    Linformer decoder consisting of *cfg.decoder.layers* layers. Each layer
-    is a :class:`LinformerDecoderLayer`.
+    SPT decoder consisting of *cfg.decoder.layers* layers. Each layer
+    is a :class:`SPTDecoderLayer`.
 
     Args:
         args (argparse.Namespace): parsed command-line arguments
@@ -70,6 +70,13 @@ class LinformerDecoderBase(FairseqIncrementalDecoder):
 
         input_embed_dim = embed_tokens.embedding_dim
         embed_dim = cfg.decoder.embed_dim
+
+        #################### For SPT ######################
+        self.alpha = nn.Parameter(torch.ones(embed_dim),
+                                 requires_grad=True)
+        ###################################################
+
+
         self.embed_dim = embed_dim
         self.output_embed_dim = cfg.decoder.output_dim
 
@@ -172,7 +179,7 @@ class LinformerDecoderBase(FairseqIncrementalDecoder):
             )
 
     def build_decoder_layer(self, cfg, no_encoder_attn=False):
-        layer = linformer_layer.LinformerDecoderLayerBase(cfg, no_encoder_attn)
+        layer = spt_layer.SPTDecoderLayerBase(cfg, no_encoder_attn)
         checkpoint = cfg.checkpoint_activations
         if checkpoint:
             offload_to_cpu = cfg.offload_activations
@@ -264,7 +271,7 @@ class LinformerDecoderBase(FairseqIncrementalDecoder):
         Similar to *forward* but only return features.
 
         Includes several features from "Jointly Learning to Align and
-        Translate with Linformer Models" (Garg et al., EMNLP 2019).
+        Translate with SPT Models" (Garg et al., EMNLP 2019).
 
         Args:
             full_context_alignment (bool, optional): don't apply
@@ -318,6 +325,11 @@ class LinformerDecoderBase(FairseqIncrementalDecoder):
             x = self.layernorm_embedding(x)
 
         x = self.dropout_module(x)
+
+        ################### For SPT ########################
+        x = x * self.alpha        
+        ####################################################
+
 
         # B x T x C -> T x B x C
         x = x.transpose(0, 1)
@@ -451,7 +463,7 @@ def Linear(in_features, out_features, bias=True):
     return m
 
 
-class LinformerDecoder(LinformerDecoderBase):
+class SPTDecoder(SPTDecoderBase):
     def __init__(
         self,
         args,
@@ -462,7 +474,7 @@ class LinformerDecoder(LinformerDecoderBase):
     ):
         self.args = args
         super().__init__(
-            LinformerConfig.from_namespace(args),
+            SPTConfig.from_namespace(args),
             dictionary,
             embed_tokens,
             no_encoder_attn=no_encoder_attn,
@@ -471,10 +483,10 @@ class LinformerDecoder(LinformerDecoderBase):
 
     def build_output_projection(self, args, dictionary, embed_tokens):
         super().build_output_projection(
-            LinformerConfig.from_namespace(args), dictionary, embed_tokens
+            SPTConfig.from_namespace(args), dictionary, embed_tokens
         )
 
     def build_decoder_layer(self, args, no_encoder_attn=False):
         return super().build_decoder_layer(
-            LinformerConfig.from_namespace(args), no_encoder_attn=no_encoder_attn
+            SPTConfig.from_namespace(args), no_encoder_attn=no_encoder_attn
         )

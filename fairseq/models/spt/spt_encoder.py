@@ -18,27 +18,27 @@ from fairseq.modules import (
     PositionalEmbedding,
     SinusoidalPositionalEmbedding,
 )
-from fairseq.modules import linformer_layer
+from fairseq.modules import spt_layer
 from fairseq.modules.checkpoint_activations import checkpoint_wrapper
 from fairseq.modules.quant_noise import quant_noise as apply_quant_noise_
 from torch import Tensor
-from fairseq.models.linformer import (
-    LinformerConfig,
+from fairseq.models.spt import (
+    SPTConfig,
 )
 
 
 # rewrite name for backward compatibility in `make_generation_fast_`
 def module_name_fordropout(module_name: str) -> str:
-    if module_name == "LinformerEncoderBase":
-        return "LinformerEncoder"
+    if module_name == "SPTEncoderBase":
+        return "SPTEncoder"
     else:
         return module_name
 
 
-class LinformerEncoderBase(FairseqEncoder):
+class SPTEncoderBase(FairseqEncoder):
     """
-    Linformer encoder consisting of *cfg.encoder.layers* layers. Each layer
-    is a :class:`LinformerEncoderLayer`.
+    SPT encoder consisting of *cfg.encoder.layers* layers. Each layer
+    is a :class:`SPTEncoderLayer`.
 
     Args:
         args (argparse.Namespace): parsed command-line arguments
@@ -58,6 +58,12 @@ class LinformerEncoderBase(FairseqEncoder):
         self.return_fc = return_fc
 
         embed_dim = embed_tokens.embedding_dim
+        ################ For SPT ####################
+        self.alpha = nn.Parameter(torch.ones(embed_dim)
+                                 , requires_grad=True)
+        #############################################
+
+
         self.padding_idx = embed_tokens.padding_idx
         self.max_source_positions = cfg.max_source_positions
 
@@ -104,7 +110,7 @@ class LinformerEncoderBase(FairseqEncoder):
             self.layer_norm = None
 
     def build_encoder_layer(self, cfg):
-        layer = linformer_layer.LinformerEncoderLayerBase(
+        layer = spt_layer.SPTEncoderLayerBase(
             cfg, return_fc=self.return_fc
         )
         checkpoint = cfg.checkpoint_activations
@@ -206,6 +212,10 @@ class LinformerEncoderBase(FairseqEncoder):
         has_pads = src_tokens.device.type == "xla" or encoder_padding_mask.any()
 
         x, encoder_embedding = self.forward_embedding(src_tokens, token_embeddings)
+
+        ############## For SPT #######################
+        x = x * self.alpha
+        ##############################################
 
         # account for padding while computing the representation
         if has_pads:
@@ -349,11 +359,11 @@ class LinformerEncoderBase(FairseqEncoder):
         return state_dict
 
 
-class LinformerEncoder(LinformerEncoderBase):
+class SPTEncoder(SPTEncoderBase):
     def __init__(self, args, dictionary, embed_tokens, return_fc=False):
         self.args = args
         super().__init__(
-            LinformerConfig.from_namespace(args),
+            SPTConfig.from_namespace(args),
             dictionary,
             embed_tokens,
             return_fc=return_fc,
@@ -361,5 +371,5 @@ class LinformerEncoder(LinformerEncoderBase):
 
     def build_encoder_layer(self, args):
         return super().build_encoder_layer(
-            LinformerConfig.from_namespace(args),
+            SPTConfig.from_namespace(args),
         )

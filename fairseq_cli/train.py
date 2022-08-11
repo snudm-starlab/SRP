@@ -39,6 +39,7 @@ from fairseq.file_io import PathManager
 from fairseq.logging import meters, metrics, progress_bar
 from fairseq.model_parallel.megatron_trainer import MegatronTrainer
 from fairseq.trainer import Trainer
+from fairseq.criterions.spt import get_group_sum, group_report
 
 
 def main(cfg: FairseqConfig) -> None:
@@ -188,6 +189,25 @@ def main(cfg: FairseqConfig) -> None:
 
         # train for one epoch
         valid_losses, should_stop = train(cfg, trainer, task, epoch_itr)
+
+        ##################### SPT #####################################
+        # Perform pruning
+        # Get Group sum
+        gl_dict = get_group_sum(model)
+        '''
+        _eps = 1e-8
+        # local_gl_dic --> k:v = local_key: [local_gl, local_count]
+        trainer.model.pruning(gl_dict,  eps=_eps)
+        trainer.optimizer._optimizer.pruning(gl_dict, trainer.model, eps=_eps)
+        '''
+        # print pruning status
+        group_report(gl_dict)
+
+        # Save pruning status (param/ bleu/ groups change)
+
+        ##############################################################
+
+
         if should_stop:
             break
 

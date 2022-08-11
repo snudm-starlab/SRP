@@ -17,6 +17,8 @@ from fairseq.optim import FairseqOptimizer, register_optimizer
 from fairseq.optim.fused_adam import get_fused_adam_class
 from omegaconf import II, OmegaConf
 
+# For SPT
+from fairseq.criterions.spt import _parsing
 
 logger = logging.getLogger(__name__)
 
@@ -237,3 +239,75 @@ class Adam(torch.optim.Optimizer):
                     p.data.copy_(p_data_fp32)
 
         return loss
+
+
+    def pruning(self, gl_dict, _model, eps=1e-8):
+
+        en_heads = _model.cfg.encoder.attention_heads
+        de_heads = _model.cfg.decoder.attention_heads
+        model_params = list(_model.parameters())
+        self.param_groups[0]['params'] = model_params
+
+        named_params = list(_model.named_parameters())
+        _dict = {}
+        for _i, (_k, _v) in enumerate(self.state.items()):
+            _n, _param = named_params[_i]
+            if 'embed_tokens' in _n or 'layer_norm' in _n or 'alpha' in _n:
+                pass
+            else:
+                ende, ly, type, wb = _parsing(_n)
+                num_heads = en_heads if ende=='encoder' else de_heads
+                
+                if 'proj' in type:
+                    attn_type = type.split('.')[0]
+                    if 'q_proj' in type or 'k_proj' in type:
+                        # qk proj
+                        _key = f'{ende}.{ly}.{attn_type}.qk'
+                    else:
+                        # vo proj
+                        _key = f'{ende}.{ly}.{attn_type}.vo'
+                    _gl, _count = gl_dict[_key]
+                    _mask = ((_gl/_count)>eps).repeat(num_heads)
+
+                    if 'out_proj' in type:
+                        if 'weight' in wb:
+                            _v['exp_avg'] = _v['exp_avg'][:, _mask]
+                            _v['exp_avg_sq'] = _v['exp_avg_sq'][:, _mask]
+                        else:
+                            pass
+                    else:
+                        # q, k, v proj
+                        if 'weight' in wb:
+                            _v['exp_avg'] = _v['exp_avg'][_mask, :]
+                            _v['exp_avg_sq'] = _v['exp_avg_sq'][_mask, :]
+                        else:
+                            _v['exp_avg'] = _v['exp_avg'][_mask]
+                            _v['exp_avg_sq'] = _v['exp_avg_sq'][_mask]
+                elif 'fc' in type:
+                    _key = f'{ende}.{ly}.fc'
+                    _gl, _count = gl_dict[_key]
+                    _mask = (_gl/_count)>eps
+                    if 'fc1' in type:
+                        if 'weight' in wb:
+                            _v['exp_avg'] = _v['exp_avg'][_mask, :]
+                            _v['exp_avg_sq'] = _v['exp_avg_sq'][_mask, :]
+                        else: 
+                            _v['exp_avg'] = _v['exp_avg'][_mask]
+                            _v['exp_avg_sq'] = _v['exp_avg_sq'][_mask]
+                    else:
+                        # fc2
+                        if 'weight' in wb:
+                            _v['exp_avg'] = _v['exp_avg'][:, _mask]
+                            _v['exp_avg_sq'] = _v['exp_avg_sq'][:, _mask]
+                        else:
+                            pass
+            _dict[model_params[_i]] = _v
+        self.state = _dict
+                            
+                    
+
+                            
+
+
+                        
+

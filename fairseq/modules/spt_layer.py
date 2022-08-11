@@ -12,15 +12,12 @@ from fairseq.modules import LayerNorm, MultiheadAttention
 from fairseq.modules.fairseq_dropout import FairseqDropout
 from fairseq.modules.quant_noise import quant_noise
 from torch import Tensor
-from fairseq.models.linformer import (
-    LinformerConfig,
+from fairseq.models.spt import (
+    SPTConfig,
 )
 
-# For Linformer
-from fairseq.modules import MultiheadLinearAttention
 
-
-class LinformerEncoderLayerBase(nn.Module):
+class SPTEncoderLayerBase(nn.Module):
     """Encoder layer block.
 
     In the original paper each operation (multi-head attention or FFN) is
@@ -42,10 +39,6 @@ class LinformerEncoderLayerBase(nn.Module):
         self.embed_dim = cfg.encoder.embed_dim
         self.quant_noise = cfg.quant_noise.pq
         self.quant_noise_block_size = cfg.quant_noise.pq_block_size
-
-        # For Linformer
-        self.compress_layer = None
-
         self.self_attn = self.build_self_attention(self.embed_dim, cfg)
         self.self_attn_layer_norm = LayerNorm(self.embed_dim, export=cfg.export)
         self.dropout_module = FairseqDropout(
@@ -141,38 +134,13 @@ class LinformerEncoderLayerBase(nn.Module):
         self.fc2.bias = torch.nn.Parameter(new_fc2_bias)
 
     def build_self_attention(self, embed_dim, cfg):
-        # TODO
-        # (1) Change it to MultiheadLinearAttention
-        # (2) Append 
-        # (3) generate shared_compress_layer if we need
-        """
-        print("#"*20)
-        print("Compreesed: ", cfg.compressed)
-        print("shared-kv-compressed", cfg.shared_kv_compressed)
-        print("#"*20)
-        """
-        if cfg.shared_layer_kv_compressed and self.compress_layer is None:
-            compress_layer = nn.Linear(
-                embed_dim,
-                embed_dim,embed_dim // self.compressed,
-                bias=False
-                )
-            nn.init.xavier_uniform_(compress_layer.weight, gain=1/math.sqrt(2))
-            self.compress_layer = self.compress_layer
-
-
-
-        return MultiheadLinearAttention(
+        return MultiheadAttention(
             embed_dim,
             cfg.encoder.attention_heads,
             dropout=cfg.attention_dropout,
             self_attention=True,
             q_noise=self.quant_noise,
             qn_block_size=self.quant_noise_block_size,
-            # For multihead linear attention
-            compressed=cfg.compressed,
-            shared_kv_compressed=cfg.shared_kv_compressed,
-            shared_compress_layer = self.compress_layer,
         )
 
     def residual_connection(self, x, residual):
@@ -259,18 +227,18 @@ class LinformerEncoderLayerBase(nn.Module):
 
 
 # backward compatible with the legacy argparse format
-class LinformerEncoderLayer(LinformerEncoderLayerBase):
+class SPTEncoderLayer(SPTEncoderLayerBase):
     def __init__(self, args):
-        super().__init__(LinformerConfig.from_namespace(args))
+        super().__init__(SPTConfig.from_namespace(args))
         self.args = args
 
     def build_self_attention(self, embed_dim, args):
         return super().build_self_attention(
-            embed_dim, LinformerConfig.from_namespace(args)
+            embed_dim, SPTConfig.from_namespace(args)
         )
 
 
-class LinformerDecoderLayerBase(nn.Module):
+class SPTDecoderLayerBase(nn.Module):
     """Decoder layer block.
 
     In the original paper each operation (multi-head attention, encoder
@@ -563,12 +531,12 @@ class LinformerDecoderLayerBase(nn.Module):
 
 
 # backward compatible with the legacy argparse format
-class LinformerDecoderLayer(LinformerDecoderLayerBase):
+class SPTDecoderLayer(SPTDecoderLayerBase):
     def __init__(
         self, args, no_encoder_attn=False, add_bias_kv=False, add_zero_attn=False
     ):
         super().__init__(
-            LinformerConfig.from_namespace(args),
+            SPTConfig.from_namespace(args),
             no_encoder_attn=no_encoder_attn,
             add_bias_kv=add_bias_kv,
             add_zero_attn=add_zero_attn,
@@ -580,7 +548,7 @@ class LinformerDecoderLayer(LinformerDecoderLayerBase):
     ):
         return super().build_self_attention(
             embed_dim,
-            LinformerConfig.from_namespace(args),
+            SPTConfig.from_namespace(args),
             add_bias_kv=add_bias_kv,
             add_zero_attn=add_zero_attn,
         )
@@ -588,5 +556,5 @@ class LinformerDecoderLayer(LinformerDecoderLayerBase):
     def build_encoder_attention(self, embed_dim, args):
         return super().build_encoder_attention(
             embed_dim,
-            LinformerConfig.from_namespace(args),
+            SPTConfig.from_namespace(args),
         )

@@ -8,21 +8,21 @@ from fairseq.models import (
     register_model,
     register_model_architecture,
 )
-from fairseq.models.linformer.linformer_config import (
-    LinformerConfig,
+from fairseq.models.spt.spt_config import (
+    SPTConfig,
     DEFAULT_MAX_SOURCE_POSITIONS,
     DEFAULT_MAX_TARGET_POSITIONS,
     DEFAULT_MIN_PARAMS_TO_WRAP,
 )
-from fairseq.models.linformer.linformer_base import (
-    LinformerModelBase,
+from fairseq.models.spt.spt_base import (
+    SPTModelBase,
 )
 
 
-@register_model("linformer")
-class LinformerModel(LinformerModelBase):
+@register_model("spt")
+class SPTModel(SPTModelBase):
     """
-    This is the legacy implementation of the linformer model that
+    This is the legacy implementation of the spt model that
     uses argparse for configuration.
     """
 
@@ -52,30 +52,30 @@ class LinformerModel(LinformerModelBase):
             }
 
         return {
-            'linformer.wmt14.en-fr': moses_subword('https://dl.fbaipublicfiles.com/fairseq/models/wmt14.en-fr.joined-dict.linformer.tar.bz2'),
-            'linformer.wmt16.en-de': 'https://dl.fbaipublicfiles.com/fairseq/models/wmt16.en-de.joined-dict.linformer.tar.bz2',
-            'linformer.wmt18.en-de': moses_subword('https://dl.fbaipublicfiles.com/fairseq/models/wmt18.en-de.ensemble.tar.gz'),
-            'linformer.wmt19.en-de': moses_fastbpe('https://dl.fbaipublicfiles.com/fairseq/models/wmt19.en-de.joined-dict.ensemble.tar.gz'),
-            'linformer.wmt19.en-ru': moses_fastbpe('https://dl.fbaipublicfiles.com/fairseq/models/wmt19.en-ru.ensemble.tar.gz'),
-            'linformer.wmt19.de-en': moses_fastbpe('https://dl.fbaipublicfiles.com/fairseq/models/wmt19.de-en.joined-dict.ensemble.tar.gz'),
-            'linformer.wmt19.ru-en': moses_fastbpe('https://dl.fbaipublicfiles.com/fairseq/models/wmt19.ru-en.ensemble.tar.gz'),
-            'linformer.wmt19.en-de.single_model': moses_fastbpe('https://dl.fbaipublicfiles.com/fairseq/models/wmt19.en-de.joined-dict.single_model.tar.gz'),
-            'linformer.wmt19.en-ru.single_model': moses_fastbpe('https://dl.fbaipublicfiles.com/fairseq/models/wmt19.en-ru.single_model.tar.gz'),
-            'linformer.wmt19.de-en.single_model': moses_fastbpe('https://dl.fbaipublicfiles.com/fairseq/models/wmt19.de-en.joined-dict.single_model.tar.gz'),
-            'linformer.wmt19.ru-en.single_model': moses_fastbpe('https://dl.fbaipublicfiles.com/fairseq/models/wmt19.ru-en.single_model.tar.gz'),
-            'linformer.wmt20.en-ta': spm('https://dl.fbaipublicfiles.com/fairseq/models/wmt20.en-ta.single.tar.gz'),
-            'linformer.wmt20.en-iu.news': spm('https://dl.fbaipublicfiles.com/fairseq/models/wmt20.en-iu.news.single.tar.gz'),
-            'linformer.wmt20.en-iu.nh': spm('https://dl.fbaipublicfiles.com/fairseq/models/wmt20.en-iu.nh.single.tar.gz'),
-            'linformer.wmt20.ta-en': spm('https://dl.fbaipublicfiles.com/fairseq/models/wmt20.ta-en.single.tar.gz'),
-            'linformer.wmt20.iu-en.news': spm('https://dl.fbaipublicfiles.com/fairseq/models/wmt20.iu-en.news.single.tar.gz'),
-            'linformer.wmt20.iu-en.nh': spm('https://dl.fbaipublicfiles.com/fairseq/models/wmt20.iu-en.nh.single.tar.gz'),
-            'linformer.flores101.mm100.615M': spm('https://dl.fbaipublicfiles.com/flores101/pretrained_models/flores101_mm100_615M.tar.gz'),
-            'linformer.flores101.mm100.175M': spm('https://dl.fbaipublicfiles.com/flores101/pretrained_models/flores101_mm100_175M.tar.gz'),
+            'spt.wmt14.en-fr': moses_subword('https://dl.fbaipublicfiles.com/fairseq/models/wmt14.en-fr.joined-dict.spt.tar.bz2'),
+            'spt.wmt16.en-de': 'https://dl.fbaipublicfiles.com/fairseq/models/wmt16.en-de.joined-dict.spt.tar.bz2',
+            'spt.wmt18.en-de': moses_subword('https://dl.fbaipublicfiles.com/fairseq/models/wmt18.en-de.ensemble.tar.gz'),
+            'spt.wmt19.en-de': moses_fastbpe('https://dl.fbaipublicfiles.com/fairseq/models/wmt19.en-de.joined-dict.ensemble.tar.gz'),
+            'spt.wmt19.en-ru': moses_fastbpe('https://dl.fbaipublicfiles.com/fairseq/models/wmt19.en-ru.ensemble.tar.gz'),
+            'spt.wmt19.de-en': moses_fastbpe('https://dl.fbaipublicfiles.com/fairseq/models/wmt19.de-en.joined-dict.ensemble.tar.gz'),
+            'spt.wmt19.ru-en': moses_fastbpe('https://dl.fbaipublicfiles.com/fairseq/models/wmt19.ru-en.ensemble.tar.gz'),
+            'spt.wmt19.en-de.single_model': moses_fastbpe('https://dl.fbaipublicfiles.com/fairseq/models/wmt19.en-de.joined-dict.single_model.tar.gz'),
+            'spt.wmt19.en-ru.single_model': moses_fastbpe('https://dl.fbaipublicfiles.com/fairseq/models/wmt19.en-ru.single_model.tar.gz'),
+            'spt.wmt19.de-en.single_model': moses_fastbpe('https://dl.fbaipublicfiles.com/fairseq/models/wmt19.de-en.joined-dict.single_model.tar.gz'),
+            'spt.wmt19.ru-en.single_model': moses_fastbpe('https://dl.fbaipublicfiles.com/fairseq/models/wmt19.ru-en.single_model.tar.gz'),
+            'spt.wmt20.en-ta': spm('https://dl.fbaipublicfiles.com/fairseq/models/wmt20.en-ta.single.tar.gz'),
+            'spt.wmt20.en-iu.news': spm('https://dl.fbaipublicfiles.com/fairseq/models/wmt20.en-iu.news.single.tar.gz'),
+            'spt.wmt20.en-iu.nh': spm('https://dl.fbaipublicfiles.com/fairseq/models/wmt20.en-iu.nh.single.tar.gz'),
+            'spt.wmt20.ta-en': spm('https://dl.fbaipublicfiles.com/fairseq/models/wmt20.ta-en.single.tar.gz'),
+            'spt.wmt20.iu-en.news': spm('https://dl.fbaipublicfiles.com/fairseq/models/wmt20.iu-en.news.single.tar.gz'),
+            'spt.wmt20.iu-en.nh': spm('https://dl.fbaipublicfiles.com/fairseq/models/wmt20.iu-en.nh.single.tar.gz'),
+            'spt.flores101.mm100.615M': spm('https://dl.fbaipublicfiles.com/flores101/pretrained_models/flores101_mm100_615M.tar.gz'),
+            'spt.flores101.mm100.175M': spm('https://dl.fbaipublicfiles.com/flores101/pretrained_models/flores101_mm100_175M.tar.gz'),
         }
         # fmt: on
 
     def __init__(self, args, encoder, decoder):
-        cfg = LinformerConfig.from_namespace(args)
+        cfg = SPTConfig.from_namespace(args)
         super().__init__(cfg, encoder, decoder)
         self.args = args
 
@@ -85,7 +85,7 @@ class LinformerModel(LinformerModelBase):
         # we want to build the args recursively in this case.
         # do not set defaults so that settings defaults from various architectures still works
         gen_parser_from_dataclass(
-            parser, LinformerConfig(), delete_default=True, with_prefix=""
+            parser, SPTConfig(), delete_default=True, with_prefix=""
         )
 
     @classmethod
@@ -129,32 +129,32 @@ class LinformerModel(LinformerModelBase):
             args.min_params_to_wrap = getattr(
                 args, "min_params_to_wrap", DEFAULT_MIN_PARAMS_TO_WRAP
             )
-        cfg = LinformerConfig.from_namespace(args)
+        cfg = SPTConfig.from_namespace(args)
         return super().build_model(cfg, task)
 
     @classmethod
     def build_embedding(cls, args, dictionary, embed_dim, path=None):
         return super().build_embedding(
-            LinformerConfig.from_namespace(args), dictionary, embed_dim, path
+            SPTConfig.from_namespace(args), dictionary, embed_dim, path
         )
 
     @classmethod
     def build_encoder(cls, args, src_dict, embed_tokens):
         return super().build_encoder(
-            LinformerConfig.from_namespace(args), src_dict, embed_tokens
+            SPTConfig.from_namespace(args), src_dict, embed_tokens
         )
 
     @classmethod
     def build_decoder(cls, args, tgt_dict, embed_tokens):
         return super().build_decoder(
-            LinformerConfig.from_namespace(args), tgt_dict, embed_tokens
+            SPTConfig.from_namespace(args), tgt_dict, embed_tokens
         )
 
 
 # architectures
 
 
-@register_model_architecture("linformer", "linformer_tiny")
+@register_model_architecture("spt", "spt_tiny")
 def tiny_architecture(args):
     args.encoder_embed_dim = getattr(args, "encoder_embed_dim", 64)
     args.encoder_ffn_embed_dim = getattr(args, "encoder_ffn_embed_dim", 64)
@@ -165,7 +165,7 @@ def tiny_architecture(args):
     return base_architecture(args)
 
 
-@register_model_architecture("linformer", "linformer")
+@register_model_architecture("spt", "spt")
 def base_architecture(args):
     args.encoder_embed_path = getattr(args, "encoder_embed_path", None)
     args.encoder_embed_dim = getattr(args, "encoder_embed_dim", 512)
@@ -221,8 +221,8 @@ def base_architecture(args):
     args.quant_noise_scalar = getattr(args, "quant_noise_scalar", 0)
 
 
-@register_model_architecture("linformer", "linformer_iwslt_de_en")
-def linformer_iwslt_de_en(args):
+@register_model_architecture("spt", "spt_iwslt_de_en")
+def spt_iwslt_de_en(args):
     args.encoder_embed_dim = getattr(args, "encoder_embed_dim", 512)
     args.encoder_ffn_embed_dim = getattr(args, "encoder_ffn_embed_dim", 1024)
     args.encoder_attention_heads = getattr(args, "encoder_attention_heads", 4)
@@ -234,14 +234,14 @@ def linformer_iwslt_de_en(args):
     base_architecture(args)
 
 
-@register_model_architecture("linformer", "linformer_wmt_en_de")
-def linformer_wmt_en_de(args):
+@register_model_architecture("spt", "spt_wmt_en_de")
+def spt_wmt_en_de(args):
     base_architecture(args)
 
 
 # parameters used in the "Attention Is All You Need" paper (Vaswani et al., 2017)
-@register_model_architecture("linformer", "linformer_vaswani_wmt_en_de_big")
-def linformer_vaswani_wmt_en_de_big(args):
+@register_model_architecture("spt", "spt_vaswani_wmt_en_de_big")
+def spt_vaswani_wmt_en_de_big(args):
     args.encoder_embed_dim = getattr(args, "encoder_embed_dim", 1024)
     args.encoder_ffn_embed_dim = getattr(args, "encoder_ffn_embed_dim", 4096)
     args.encoder_attention_heads = getattr(args, "encoder_attention_heads", 16)
@@ -253,23 +253,23 @@ def linformer_vaswani_wmt_en_de_big(args):
     base_architecture(args)
 
 
-@register_model_architecture("linformer", "linformer_vaswani_wmt_en_fr_big")
-def linformer_vaswani_wmt_en_fr_big(args):
+@register_model_architecture("spt", "spt_vaswani_wmt_en_fr_big")
+def spt_vaswani_wmt_en_fr_big(args):
     args.dropout = getattr(args, "dropout", 0.1)
-    linformer_vaswani_wmt_en_de_big(args)
+    spt_vaswani_wmt_en_de_big(args)
 
 
-@register_model_architecture("linformer", "linformer_wmt_en_de_big")
-def linformer_wmt_en_de_big(args):
+@register_model_architecture("spt", "spt_wmt_en_de_big")
+def spt_wmt_en_de_big(args):
     args.attention_dropout = getattr(args, "attention_dropout", 0.1)
-    linformer_vaswani_wmt_en_de_big(args)
+    spt_vaswani_wmt_en_de_big(args)
 
 
 # default parameters used in tensor2tensor implementation
-@register_model_architecture("linformer", "linformer_wmt_en_de_big_t2t")
-def linformer_wmt_en_de_big_t2t(args):
+@register_model_architecture("spt", "spt_wmt_en_de_big_t2t")
+def spt_wmt_en_de_big_t2t(args):
     args.encoder_normalize_before = getattr(args, "encoder_normalize_before", True)
     args.decoder_normalize_before = getattr(args, "decoder_normalize_before", True)
     args.attention_dropout = getattr(args, "attention_dropout", 0.1)
     args.activation_dropout = getattr(args, "activation_dropout", 0.1)
-    linformer_vaswani_wmt_en_de_big(args)
+    spt_vaswani_wmt_en_de_big(args)

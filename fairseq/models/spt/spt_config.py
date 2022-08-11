@@ -43,7 +43,7 @@ class EncDecBaseConfig(FairseqDataclass):
     learned_pos: bool = field(
         default=False, metadata={"help": "use learned positional embeddings"}
     )
-    # args for "Reducing Linformer Depth on Demand with Structured Dropout" (Fan et al., 2019)
+    # args for "Reducing SPT Depth on Demand with Structured Dropout" (Fan et al., 2019)
     layerdrop: float = field(default=0, metadata={"help": "LayerDrop probability"})
     layers_to_keep: Optional[List[int]] = field(
         default=None, metadata={"help": "which layers to *keep* when pruning"}
@@ -87,7 +87,7 @@ class QuantNoiseConfig(FairseqDataclass):
 
 
 @dataclass
-class LinformerConfig(FairseqDataclass):
+class SPTConfig(FairseqDataclass):
     activation_fn: ChoiceEnum(utils.get_available_activation_fns()) = field(
         default="relu",
         metadata={"help": "activation function to use"},
@@ -174,7 +174,7 @@ class LinformerConfig(FairseqDataclass):
             "help": "checkpoint activations at each layer, then save to gpu. Sets --checkpoint-activations."
         },
     )
-    # args for "Cross+Self-Attention for Linformer Models" (Peitz et al., 2019)
+    # args for "Cross+Self-Attention for SPT Models" (Peitz et al., 2019)
     no_cross_attention: bool = field(
         default=False, metadata={"help": "do not perform cross-attention"}
     )
@@ -216,7 +216,7 @@ class LinformerConfig(FairseqDataclass):
         metadata={"help": "make the layernorm exportable with torchscript."},
     )
 
-    # copied from linformer_lm but expected in linformer_decoder:
+    # copied from spt_lm but expected in spt_decoder:
     no_decoder_final_norm: bool = field(
         default=False,
         metadata={"help": "don't add an extra layernorm after the last decoder block"},
@@ -224,27 +224,8 @@ class LinformerConfig(FairseqDataclass):
 
     # We need to make this hierarchical dataclass like the flat namespace
     # __getattr__ and __setattr__ here allow backward compatibility
-    # for subclasses of Linformer(Legacy) that depend on read/write on
+    # for subclasses of SPT(Legacy) that depend on read/write on
     # the flat namespace.
-
-
-    """ Linformer Configuration """
-    compressed: int = field(
-        default=1,
-        metadata={"help": "Compression rate for multihead linear attention"},
-    )
-
-    shared_kv_compressed: bool = field(
-        default=False,
-        metadata={"help": "Sharing key and value projection matrices"},
-    )
-
-    shared_layer_kv_compressed: bool = field(
-        default=False,
-        metadata={"help": "Sharing all keys and values projection matrices for each layer"},
-    )
-
-    """ Linformer Configuaration End """
 
     def __getattr__(self, name):
         match = re.match(_NAME_PARSER, name)
@@ -293,7 +274,7 @@ class LinformerConfig(FairseqDataclass):
             # go to the sub struct called `decoder`. There are ways to go around this, but let's keep it simple
             # for now.
             for fld in fields(cls):
-                # concretelly, the linformer_config know what sub-dc it has, so we go through all the dc fields
+                # concretelly, the spt_config know what sub-dc it has, so we go through all the dc fields
                 # and if it's one that has a sub-dc, we build that sub-dc with `copy_keys()`
                 if fld.name == "decoder":
                     if safe_hasattr(args, "decoder"):

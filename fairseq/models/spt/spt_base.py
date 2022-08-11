@@ -13,27 +13,29 @@ from fairseq import utils
 from fairseq.dataclass.utils import gen_parser_from_dataclass
 from fairseq.distributed import fsdp_wrap
 from fairseq.models import FairseqEncoderDecoderModel
-from fairseq.models.linformer import (
-    LinformerConfig,
-    LinformerDecoderBase,
-    LinformerEncoderBase,
+from fairseq.models.spt import (
+    SPTConfig,
+    SPTDecoderBase,
+    SPTEncoderBase,
 )
+# For SPT
+from fairseq.criterions.spt import _parsing
 
 
-class LinformerModelBase(FairseqEncoderDecoderModel):
+class SPTModelBase(FairseqEncoderDecoderModel):
     """
-    Linformer model from `"Attention Is All You Need" (Vaswani, et al, 2017)
+    SPT model from `"Attention Is All You Need" (Vaswani, et al, 2017)
     <https://arxiv.org/abs/1706.03762>`_.
 
     Args:
-        encoder (LinformerEncoder): the encoder
-        decoder (LinformerDecoder): the decoder
+        encoder (SPTEncoder): the encoder
+        decoder (SPTDecoder): the decoder
 
-    The Linformer model provides the following named architectures and
+    The SPT model provides the following named architectures and
     command-line arguments:
 
     .. argparse::
-        :ref: fairseq.models.linformer_parser
+        :ref: fairseq.models.spt_parser
         :prog:
     """
 
@@ -47,7 +49,7 @@ class LinformerModelBase(FairseqEncoderDecoderModel):
         """Add model-specific arguments to the parser."""
         # we want to build the args recursively in this case.
         gen_parser_from_dataclass(
-            parser, LinformerConfig(), delete_default=False, with_prefix=""
+            parser, SPTConfig(), delete_default=False, with_prefix=""
         )
 
     @classmethod
@@ -67,6 +69,7 @@ class LinformerModelBase(FairseqEncoderDecoderModel):
 
         src_dict, tgt_dict = task.source_dictionary, task.target_dictionary
 
+        # Build Embeddings
         if cfg.share_all_embeddings:
             if src_dict != tgt_dict:
                 raise ValueError("--share-all-embeddings requires a joined dictionary")
@@ -94,6 +97,8 @@ class LinformerModelBase(FairseqEncoderDecoderModel):
             )
         if cfg.offload_activations:
             cfg.checkpoint_activations = True  # offloading implies checkpointing
+
+        # Build Encoder, Decoder
         encoder = cls.build_encoder(cfg, src_dict, encoder_embed_tokens)
         decoder = cls.build_decoder(cfg, tgt_dict, decoder_embed_tokens)
         return cls(cfg, encoder, decoder)
@@ -112,16 +117,16 @@ class LinformerModelBase(FairseqEncoderDecoderModel):
 
     @classmethod
     def build_encoder(cls, cfg, src_dict, embed_tokens):
-        return LinformerEncoderBase(cfg, src_dict, embed_tokens)
+        return SPTEncoderBase(cfg, src_dict, embed_tokens)
 
     @classmethod
     def build_decoder(cls, cfg, tgt_dict, embed_tokens):
-        return LinformerDecoderBase(
+        return SPTDecoderBase(
             cfg,
             tgt_dict,
             embed_tokens,
             no_encoder_attn=cfg.no_cross_attention,
-    )   
+        )
 
     # TorchScript doesn't support optional arguments with variable length (**kwargs).
     # Current workaround is to add union of all arguments in child classes.
@@ -168,9 +173,78 @@ class LinformerModelBase(FairseqEncoderDecoderModel):
         """Get normalized probabilities (or log probs) from a net's output."""
         return self.get_normalized_probs_scriptable(net_output, log_probs, sample)
 
+    @torch.no_grad()
+    def pruning(self, gl_dict, eps=1e-8):
+        en_heads = self.cfg.encoder.attention_heads
+        de_heads = self.cfg.decoder.attention_heads
+        for _n, _p in self.named_parameters():
+            if 'embed_tokens' in _n or 'layer_norm' in _n or 'alpha' in _n:
+                # Global pruning (TBD)
+                set_param(self, _n, nn.Parameter(_p.data))
+                continue
+            else:
+                ende, ly, type, wb = _parsing(_n)
+                num_heads = en_heads if ende=='encoder' else de_heads
+                if 'proj' in type:
+                    attn_type = type.split('.')[0]
+                    # Get _key
+                    if 'q_proj' in type or 'k_proj' in type:
+                        # qk proj
+                        _key = f'{ende}.{ly}.{attn_type}.qk'
+                    else:
+                        # vo proj
+                        _key = f'{ende}.{ly}.{attn_type}.vo'
+                    _gl, _count = gl_dict[_key]
+                    _mask = ((_gl/_count)>eps).repeat(num_heads)
+                    # Perform pruning
+                    if 'out_proj' in type:
+                        if 'weight' in wb:
+                            set_param(self, _n,
+                                      nn.Parameter(_p.data[:, _mask]))
+                        else:
+                            # bias
+                            set_param(self, _n,
+                                      nn.Parameter(_p.data))
+                            continue
+                    else:
+                        # q,k,v_proj
+                        if 'weight' in wb:
+                            set_param(self, _n,
+                                      nn.Parameter(_p.data[_mask, :]))
+                        else:
+                            set_param(self, _n,
+                                      nn.Parameter(_p.data[_mask]))
+                elif 'fc' in type:
+                    _key = f'{ende}.{ly}.fc'
+                    _gl, _count = gl_dict[_key]
+                    _mask = (_gl/_count)>eps
+                    if 'fc1' in type:
+                        if 'weight' in wb:
+                            set_param(self, _n,
+                                      nn.Parameter(_p.data[_mask, :]))
+                        else:
+                            set_param(self, _n,
+                                      nn.Parameter(_p.data[_mask]))
+                    else:
+                        # fc2
+                        if 'weight' in wb:
+                            set_param(self, _n,
+                                      nn.Parameter(_p.data[:, _mask]))
+                        else:
+                            set_param(self, _n,
+                                      nn.Parameter(_p.data))
+                            continue
 
 def Embedding(num_embeddings, embedding_dim, padding_idx):
     m = nn.Embedding(num_embeddings, embedding_dim, padding_idx=padding_idx)
     nn.init.normal_(m.weight, mean=0, std=embedding_dim**-0.5)
     nn.init.constant_(m.weight[padding_idx], 0)
     return m
+
+
+def set_param(_model, _name, new_param):
+    _attrs = _name.split('.')
+    _parent = _model
+    for _attr in _attrs[:-1]:
+        _parent = getattr(_parent, _attr)
+    setattr(_parent, _attrs[-1], new_param)
