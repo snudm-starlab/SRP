@@ -180,8 +180,6 @@ def main(cfg: FairseqConfig) -> None:
     train_meter.start()
 
 
-
-
     while epoch_itr.next_epoch_idx <= max_epoch:
         if lr <= cfg.optimization.stop_min_lr:
             logger.info(
@@ -199,7 +197,7 @@ def main(cfg: FairseqConfig) -> None:
         # Get Group sum
         gl_dict = get_group_sum(trainer.model)
         
-        _eps = 1e-8
+        _eps = cfg.comon.prune_eps
         # local_gl_dic --> k:v = local_key: [local_gl, local_count]
         trainer.model.pruning(gl_dict,  eps=_eps)
         trainer.optimizer._optimizer.pruning(gl_dict, trainer.model, eps=_eps) 
