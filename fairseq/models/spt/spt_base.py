@@ -177,8 +177,16 @@ class SPTModelBase(FairseqEncoderDecoderModel):
     def pruning(self, gl_dict, eps=1e-8):
         en_heads = self.cfg.encoder.attention_heads
         de_heads = self.cfg.decoder.attention_heads
+        
         for _n, _p in self.named_parameters():
-            if 'embed_tokens' in _n or 'layer_norm' in _n or 'alpha' in _n:
+            if 'embed_tokens' in _n:
+                set_param(self, _n, nn.Parameter(_p.data))
+                if 'decoder.embed_tokens' in _n:
+                    self.decoder.output_projection.weight = self.decoder.embed_tokens.weight
+                continue                
+            elif 'output_projection' in _n:
+                continue
+            elif 'layer_norm' in _n or 'alpha' in _n:
                 # Global pruning (TBD)
                 set_param(self, _n, nn.Parameter(_p.data))
                 continue
@@ -209,6 +217,14 @@ class SPTModelBase(FairseqEncoderDecoderModel):
                     else:
                         # q,k,v_proj
                         if 'weight' in wb:
+                            '''
+                            ############### For Test ##################
+                            if torch.sum(_mask) == 0:
+                                print('\n\n+++++++++++++++++++++++++')
+                                print(_p.data[0:10, 0:10])
+                                print('++++++++++++++++++++++++++++')
+                            ###########################################
+                            '''
                             set_param(self, _n,
                                       nn.Parameter(_p.data[_mask, :]))
                         else:
