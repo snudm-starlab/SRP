@@ -7,7 +7,7 @@
 Train a new model on one or across multiple GPUs.
 """
 
-import argparse
+import argparse, time
 import logging
 import math
 import os
@@ -178,6 +178,10 @@ def main(cfg: FairseqConfig) -> None:
 
     train_meter = meters.StopwatchMeter()
     train_meter.start()
+
+
+
+
     while epoch_itr.next_epoch_idx <= max_epoch:
         if lr <= cfg.optimization.stop_min_lr:
             logger.info(
@@ -189,24 +193,22 @@ def main(cfg: FairseqConfig) -> None:
 
         # train for one epoch
         valid_losses, should_stop = train(cfg, trainer, task, epoch_itr)
-
-        ##################### SPT #####################################
+        
+        ##################### SPT  Pruning ##########################
         # Perform pruning
         # Get Group sum
-        gl_dict = get_group_sum(model)
-        '''
+        gl_dict = get_group_sum(trainer.model)
+        
         _eps = 1e-8
         # local_gl_dic --> k:v = local_key: [local_gl, local_count]
         trainer.model.pruning(gl_dict,  eps=_eps)
-        trainer.optimizer._optimizer.pruning(gl_dict, trainer.model, eps=_eps)
-        '''
+        trainer.optimizer._optimizer.pruning(gl_dict, trainer.model, eps=_eps) 
         # print pruning status
         group_report(gl_dict)
 
         # Save pruning status (param/ bleu/ groups change)
 
         ##############################################################
-
 
         if should_stop:
             break
@@ -350,6 +352,16 @@ def train(
         valid_losses, should_stop = validate_and_save(
             cfg, trainer, task, epoch_itr, valid_subsets, end_of_epoch
         )
+        ##################### SPT  Pruning ##########################
+        # Perform pruning
+        # Get Group sum
+        gl_dict = get_group_sum(trainer.model)
+        
+        _eps = 1e-8
+        # local_gl_dic --> k:v = local_key: [local_gl, local_count]
+        trainer.model.pruning(gl_dict,  eps=_eps)
+        trainer.optimizer._optimizer.pruning(gl_dict, trainer.model, eps=_eps) 
+        ##############################################################
 
         if should_stop:
             break
