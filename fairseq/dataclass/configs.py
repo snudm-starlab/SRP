@@ -250,6 +250,14 @@ class CommonConfig(FairseqDataclass):
             "help": "path to run plasma_store, defaults to /tmp/plasma. Paths outside /tmp tend to fail."
         },
     )
+    ################################ For SPT ####################################
+    prune_eps: float = field(
+        default=1e-8,
+        metadata={
+            "help": "pruning threshold for SPT"
+        },
+    )
+    ##############################################################################
 
 
 @dataclass
