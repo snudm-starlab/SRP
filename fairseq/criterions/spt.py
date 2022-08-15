@@ -74,8 +74,7 @@ def get_group_sum(model):
     gl_dict = {} # _key: [_gl, _count]
     en_heads = model.cfg.encoder.attention_heads
     de_heads = model.cfg.decoder.attention_heads
-
-    for _n, _p in model.named_parameters():        
+    for _n, _p in model.named_parameters():
         if 'embed_tokens' in _n:
             continue
         elif 'layer_norm' in _n or 'alpha' in _n:
@@ -153,12 +152,12 @@ def get_group_sum(model):
                         _global_gl = _tmp2[::2] + _tmp2[1::2]
                         """
                     else:
-                        _count = _p.shape[0]
+                        _count = 1
                         _gl = _p*_p
                         """
                         _global_count = -1
                         """
-                else:
+                elif 'fc2' in type:
                     # fc2
                     if 'weight' in wb:
                         _count = _p.shape[0]
@@ -177,6 +176,8 @@ def get_group_sum(model):
                         _tmp2 = _p * _p
                         _global_gl = _tmp2[::2] + _tmp2[1::2]
                         """
+                else:
+                    _count = -1
             else:
                 print("Unknwon parameter found!")
 
@@ -232,7 +233,7 @@ def group_lasso_loss(model):
                          torch.sqrt(torch.tensor(_count)))
         if 'global' in _k:
             global_gl_loss = _gl_loss
-        if 'qk' in _k:
+        elif 'qk' in _k:
             if local_qk_gl_loss is None:
                 local_qk_gl_loss = _gl_loss
             else:
@@ -261,7 +262,10 @@ def _parsing(_name):
     if 'attn' in _name:
         ende, ly, type, wb = _l[0], _l[2], f'{_l[3]}.{_l[4]}',_l[5]
     else:
-        ende, ly, type, wb = _l[0], _l[2], _l[3],_l[4]
+        try:
+            ende, ly, type, wb = _l[0], _l[2], _l[3],_l[4]
+        except Exception:
+            print("* Name: ", _name)
 
     return ende, ly, type, wb
 
