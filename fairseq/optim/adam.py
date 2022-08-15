@@ -242,16 +242,20 @@ class Adam(torch.optim.Optimizer):
 
 
     def pruning(self, gl_dict, _model, eps=1e-8):
-
         en_heads = _model.cfg.encoder.attention_heads
         de_heads = _model.cfg.decoder.attention_heads
-        model_params = list(_model.parameters())
-        self.param_groups[0]['params'] = model_params
 
         named_params = list(_model.named_parameters())
+        param_list = list(_model.parameters())
+
+        # model_params = list(param_list)
+        self.param_groups[0]['params'] = param_list
+
+        # named_params = list(_model.named_parameters())
         _dict = {}
+        
         for _i, (_k, _v) in enumerate(self.state.items()):
-            _n, _param = named_params[_i]
+            _n = named_params[_i][0]
             if 'embed_tokens' in _n or 'layer_norm' in _n or 'alpha' in _n:
                 pass
             else:
@@ -301,7 +305,7 @@ class Adam(torch.optim.Optimizer):
                             _v['exp_avg_sq'] = _v['exp_avg_sq'][:, _mask]
                         else:
                             pass
-            _dict[model_params[_i]] = _v
+            _dict[param_list[_i]] = _v
         self.state = _dict
                             
                     
