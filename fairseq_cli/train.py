@@ -202,7 +202,17 @@ def main(cfg: FairseqConfig) -> None:
         trainer.model.pruning(gl_dict,  eps=_eps)
         trainer.optimizer._optimizer.pruning(gl_dict, trainer.model, eps=_eps) 
         # print pruning status
-        group_report(gl_dict)
+        _res = f'{epoch_itr.epoch},'
+        _group_res = group_report(trainer.model, gl_dict)
+        _res += _group_res
+        _res += f',{valid_losses}'
+        print("+"*15, '  Test ', '+'*15)
+        print(_res)
+        _res_file = f'./checkpoint/{cfg.checkpoint.save_dir}/res.csv'
+        print(_res_file)
+        print("+"*15, '  Test ', '+'*15)
+        with open(res_file, a) as f:
+            f.write(_res + '\n')
 
         # Save pruning status (param/ bleu/ groups change)
 
