@@ -205,10 +205,14 @@ def get_group_sum(model):
     return gl_dict
 
 
-def group_report(gl_dict, eps=1e-8):
+def group_report(model, gl_dict, eps=1e-8):
     print("="*15, 'PRUNING STATUS' ,"="*15)
+    _params = get_param_num(model)
+    print("* Number of Paramters: ", _params)
+    _res = ''
     for _k in gl_dict.keys():
         _suv = torch.sum(gl_dict[_k][0]/gl_dict[_k][1] > eps)
+        _res += f'{_suv},'
         if 'global' in _k:
             print(f"{_k}: {_suv}/512 | count: {gl_dict[_k][1]}") 
             print("Global gl[0:20]: ")
@@ -218,6 +222,13 @@ def group_report(gl_dict, eps=1e-8):
         else:
             print(f"{_k}: {_suv}/128 | count: {gl_dict[_k][1]}")
     print("="*50)
+    _res +=f'{_params}'
+    return _res
+
+
+def get_param_num(model):
+    _num = np.sum([_p.numel() for _p in model.parameters()])
+    return _num 
 
 
 def group_lasso_loss(model):
