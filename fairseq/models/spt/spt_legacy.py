@@ -233,6 +233,71 @@ def spt_iwslt_de_en(args):
     args.decoder_layers = getattr(args, "decoder_layers", 6)
     base_architecture(args)
 
+################################ FC TEST ###################################
+@register_model_architecture("spt", "spt_iwslt_de_en_128")
+def spt_iwslt_de_en_128(args):
+    args.encoder_embed_dim = getattr(args, "encoder_embed_dim", 512)
+    args.encoder_ffn_embed_dim = getattr(args, "encoder_ffn_embed_dim", 128)
+    args.encoder_attention_heads = getattr(args, "encoder_attention_heads", 4)
+    args.encoder_layers = getattr(args, "encoder_layers", 6)
+    args.decoder_embed_dim = getattr(args, "decoder_embed_dim", 512)
+    args.decoder_ffn_embed_dim = getattr(args, "decoder_ffn_embed_dim", 128)
+    args.decoder_attention_heads = getattr(args, "decoder_attention_heads", 4)
+    args.decoder_layers = getattr(args, "decoder_layers", 6)
+    base_architecture(args)
+
+@register_model_architecture("spt", "spt_iwslt_de_en_256")
+def spt_iwslt_de_en_256(args):
+    args.encoder_embed_dim = getattr(args, "encoder_embed_dim", 512)
+    args.encoder_ffn_embed_dim = getattr(args, "encoder_ffn_embed_dim", 256)
+    args.encoder_attention_heads = getattr(args, "encoder_attention_heads", 4)
+    args.encoder_layers = getattr(args, "encoder_layers", 6)
+    args.decoder_embed_dim = getattr(args, "decoder_embed_dim", 512)
+    args.decoder_ffn_embed_dim = getattr(args, "decoder_ffn_embed_dim", 256)
+    args.decoder_attention_heads = getattr(args, "decoder_attention_heads", 4)
+    args.decoder_layers = getattr(args, "decoder_layers", 6)
+    base_architecture(args)
+
+@register_model_architecture("spt", "spt_iwslt_de_en_512")
+def spt_iwslt_de_en_512(args):
+    args.encoder_embed_dim = getattr(args, "encoder_embed_dim", 512)
+    args.encoder_ffn_embed_dim = getattr(args, "encoder_ffn_embed_dim", 512)
+    args.encoder_attention_heads = getattr(args, "encoder_attention_heads", 4)
+    args.encoder_layers = getattr(args, "encoder_layers", 6)
+    args.decoder_embed_dim = getattr(args, "decoder_embed_dim", 512)
+    args.decoder_ffn_embed_dim = getattr(args, "decoder_ffn_embed_dim", 512)
+    args.decoder_attention_heads = getattr(args, "decoder_attention_heads", 4)
+    args.decoder_layers = getattr(args, "decoder_layers", 6)
+    base_architecture(args)
+
+##################################################################################
+
+
+######################### Starlab Goal ################################
+@register_model_architecture("spt", "spt_iwslt_de_en_small")
+def spt_iwslt_de_en_small(args):
+    args.encoder_embed_dim = getattr(args, "encoder_embed_dim", 200)
+    args.encoder_ffn_embed_dim = getattr(args, "encoder_ffn_embed_dim", 380)
+    args.encoder_attention_heads = getattr(args, "encoder_attention_heads", 4)
+    args.encoder_layers = getattr(args, "encoder_layers", 6)
+    args.decoder_embed_dim = getattr(args, "decoder_embed_dim", 200)
+    args.decoder_ffn_embed_dim = getattr(args, "decoder_ffn_embed_dim", 380)
+    args.decoder_attention_heads = getattr(args, "decoder_attention_heads", 4)
+    args.decoder_layers = getattr(args, "decoder_layers", 6)
+    base_architecture(args)
+
+@register_model_architecture("spt", "spt_iwslt_de_en_small2")
+def spt_iwslt_de_en_small2(args):
+    args.encoder_embed_dim = getattr(args, "encoder_embed_dim", 220)
+    args.encoder_ffn_embed_dim = getattr(args, "encoder_ffn_embed_dim", 660)
+    args.encoder_attention_heads = getattr(args, "encoder_attention_heads", 4)
+    args.encoder_layers = getattr(args, "encoder_layers", 6)
+    args.decoder_embed_dim = getattr(args, "decoder_embed_dim", 220)
+    args.decoder_ffn_embed_dim = getattr(args, "decoder_ffn_embed_dim", 660)
+    args.decoder_attention_heads = getattr(args, "decoder_attention_heads", 4)
+    args.decoder_layers = getattr(args, "decoder_layers", 6)
+    base_architecture(args)
+#########################################################################
 
 @register_model_architecture("spt", "spt_wmt_en_de")
 def spt_wmt_en_de(args):
