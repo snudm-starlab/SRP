@@ -5,6 +5,7 @@
 
 import math, time
 from dataclasses import dataclass, field
+import numpy as np
 
 import torch
 from fairseq import metrics, utils
