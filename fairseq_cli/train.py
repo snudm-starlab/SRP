@@ -205,13 +205,14 @@ def main(cfg: FairseqConfig) -> None:
         _res = f'{epoch_itr.epoch},'
         _group_res = group_report(trainer.model, gl_dict)
         _res += _group_res
-        _res += f',{valid_losses}'
+        _res += f',{valid_losses[0]}'
         print("+"*15, '  Test ', '+'*15)
         print(_res)
-        _res_file = f'./checkpoint/{cfg.checkpoint.save_dir}/res.csv'
+        _path_list = cfg.checkpoint.save_dir.split('/')
+        _res_file = f'./checkpoints/res_files/{_path_list[-1]}.csv'
         print(_res_file)
         print("+"*15, '  Test ', '+'*15)
-        with open(res_file, a) as f:
+        with open(_res_file, 'a') as f:
             f.write(_res + '\n')
 
         # Save pruning status (param/ bleu/ groups change)
@@ -360,6 +361,7 @@ def train(
         valid_losses, should_stop = validate_and_save(
             cfg, trainer, task, epoch_itr, valid_subsets, end_of_epoch
         )
+        
         ##################### SPT  Pruning ##########################
         # Perform pruning
         # Get Group sum
@@ -370,7 +372,7 @@ def train(
         trainer.model.pruning(gl_dict,  eps=_eps)
         trainer.optimizer._optimizer.pruning(gl_dict, trainer.model, eps=_eps) 
         ##############################################################
-
+        
         if should_stop:
             break
 
