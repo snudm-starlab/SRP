@@ -361,8 +361,8 @@ def train(
         valid_losses, should_stop = validate_and_save(
             cfg, trainer, task, epoch_itr, valid_subsets, end_of_epoch
         )
-        
-        ##################### SPT  Pruning ##########################
+        """    
+        ################# SPT  Pruning (Step-wise) ###################
         # Perform pruning
         # Get Group sum
         gl_dict = get_group_sum(trainer.model)
@@ -372,6 +372,7 @@ def train(
         trainer.model.pruning(gl_dict,  eps=_eps)
         trainer.optimizer._optimizer.pruning(gl_dict, trainer.model, eps=_eps) 
         ##############################################################
+        """
         
         if should_stop:
             break
