@@ -278,7 +278,6 @@ def _parsing(_name):
             ende, ly, type, wb = _l[0], _l[2], _l[3],_l[4]
         except Exception:
             print("* Name: ", _name)
-
     return ende, ly, type, wb
 
 # For SPT end

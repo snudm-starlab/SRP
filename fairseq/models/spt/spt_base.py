@@ -8,6 +8,7 @@ from typing import Dict, List, Optional, Tuple
 import torch
 import torch.nn as nn
 from torch import Tensor
+import numpy as np
 
 from fairseq import utils
 from fairseq.dataclass.utils import gen_parser_from_dataclass
@@ -236,6 +237,16 @@ class SPTModelBase(FairseqEncoderDecoderModel):
                     _mask = (_gl/_count)>eps
                     if 'fc1' in type:
                         if 'weight' in wb:
+                            # adjust dropout rate for fc1
+                            _ll = _n.split('.')[:-2]+\
+                                    ['activation_dropout_module_fc1']
+                            _dropout_name = '.'.join(_ll)
+                            _dropout = recursive_get_param(self, _dropout_name)
+                            _out, _in = _p.data.shape
+                            new_out = torch.sum(_mask).item()
+                            _dropout.p = _dropout.p * np.sqrt(new_out/ _out)
+                            # adjust dropout rate for fc1 end
+
                             set_param(self, _n,
                                       nn.Parameter(_p.data[_mask, :]))
                         else:
@@ -244,6 +255,16 @@ class SPTModelBase(FairseqEncoderDecoderModel):
                     else:
                         # fc2
                         if 'weight' in wb:
+                            # adjust dropout rate for fc2
+                            _ll = _n.split('.')[:-2]+\
+                                    ['dropout_module_fc2']
+                            _dropout_name = '.'.join(_ll)
+                            _dropout = recursive_get_param(self, _dropout_name)
+                            _out, _in = _p.data.shape
+                            new_in = torch.sum(_mask).item()
+                            _dropout.p = _dropout.p * np.sqrt(new_in/ _in)
+                            # adjust dropout rate for fc1 end
+
                             set_param(self, _n,
                                       nn.Parameter(_p.data[:, _mask]))
                         else:
@@ -264,3 +285,10 @@ def set_param(_model, _name, new_param):
     for _attr in _attrs[:-1]:
         _parent = getattr(_parent, _attr)
     setattr(_parent, _attrs[-1], new_param)
+
+def recursive_get_param(_model, _name):
+    _attrs = _name.split('.')
+    _parent = _model
+    for _attr in _attrs[:-1]:
+        _parent = getattr(_parent, _attr)
+    return getattr(_parent, _attrs[-1])

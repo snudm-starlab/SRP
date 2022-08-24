@@ -44,12 +44,18 @@ class SPTEncoderLayerBase(nn.Module):
         self.dropout_module = FairseqDropout(
             cfg.dropout, module_name=self.__class__.__name__
         )
+        self.dropout_module_fc2 = FairseqDropout(
+            cfg.dropout, module_name=self.__class__.__name__
+        )
         self.activation_fn = utils.get_activation_fn(activation=cfg.activation_fn)
         activation_dropout_p = cfg.activation_dropout
         if activation_dropout_p == 0:
             # for backwards compatibility with models that use cfg.relu_dropout
             activation_dropout_p = cfg.relu_dropout or 0
         self.activation_dropout_module = FairseqDropout(
+            float(activation_dropout_p), module_name=self.__class__.__name__
+        )
+        self.activation_dropout_module_fc1 = FairseqDropout(
             float(activation_dropout_p), module_name=self.__class__.__name__
         )
         self.normalize_before = cfg.encoder.normalize_before
@@ -221,12 +227,12 @@ class SPTEncoderLayerBase(nn.Module):
             if self.normalize_before:
                 x = self.final_layer_norm(x)
             x = self.activation_fn(self.fc1(x))
-            x = self.activation_dropout_module(x)
+            x = self.activation_dropout_module_fc1(x)
             x = self.fc2(x)
 
             fc_result = x
 
-            x = self.dropout_module(x)
+            x = self.dropout_module_fc2(x)
             x = self.residual_connection(x, residual)
             if not self.normalize_before:
                 x = self.final_layer_norm(x)
@@ -273,6 +279,9 @@ class SPTDecoderLayerBase(nn.Module):
         self.dropout_module = FairseqDropout(
             cfg.dropout, module_name=self.__class__.__name__
         )
+        self.dropout_module_fc2 = FairseqDropout(
+            cfg.dropout, module_name=self.__class__.__name__
+        )
         self.quant_noise = cfg.quant_noise.pq
         self.quant_noise_block_size = cfg.quant_noise.pq_block_size
 
@@ -304,6 +313,9 @@ class SPTDecoderLayerBase(nn.Module):
             # for backwards compatibility with models that use cfg.relu_dropout
             activation_dropout_p = cfg.relu_dropout or 0
         self.activation_dropout_module = FairseqDropout(
+            float(activation_dropout_p), module_name=self.__class__.__name__
+        )
+        self.activation_dropout_module_fc1 = FairseqDropout(
             float(activation_dropout_p), module_name=self.__class__.__name__
         )
         self.normalize_before = cfg.decoder.normalize_before
@@ -530,11 +542,13 @@ class SPTDecoderLayerBase(nn.Module):
             if self.normalize_before:
                 x = self.final_layer_norm(x)
             x = self.activation_fn(self.fc1(x))
-            x = self.activation_dropout_module(x)
+            x = self.activation_dropout_module_fc1(x)
+
             if self.ffn_layernorm is not None:
                 x = self.ffn_layernorm(x)
             x = self.fc2(x)
-            x = self.dropout_module(x)
+            x = self.dropout_module_fc2(x)
+
             if self.w_resid is not None:
                 residual = torch.mul(self.w_resid, residual)
             x = self.residual_connection(x, residual)
