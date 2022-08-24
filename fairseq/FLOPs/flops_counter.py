@@ -1,402 +1,229 @@
-SOFTMAX_FLOPS = 5
+# Ref: https://github.com/google-research/electra/blob/master/flops_computation.py
+
 DROPOUT_FLOPS = 4
 LAYER_NORM_FLOPS = 5
 ACTIVATION_FLOPS = 8
+SOFTMAX_FLOPS = 8
 
 
-########################### Computing FLOPs #####################
-
-def get_flops(
-                bs=None,
-                kq_dim=None,
-                v_dim=None,
-                seq_len=None,
-                num_heads=None,
-                emb_dim=None,
-                ffn_dim=None,
-                input_bits=None,
-                encoder_bits=None,
-                decoder_bits=None,
-                **kwargs,
-            ):
-    _flops = 0
-    _flops += get_encoder_flops(bs,kq_dim,v_dim,seq_len,num_heads,emb_dim,ffn_dim,
-                                input_bits, encoder_bits)
-    _flops += get_decoder_flops(bs,kq_dim,v_dim,seq_len,num_heads,emb_dim,ffn_dim,
-                                input_bits, decoder_bits)
-    return _flops
-
-
-def get_decoder_flops(
-                      bs=None,
-                      kq_dim=None,
-                      v_dim=None,
-                      seq_len=None,
-                      num_heads=None,
-                      emb_dim=None,
-                      ffn_dim=None,
-                      input_bits=None,
-                      ffn_bits=None,
-                      ):
-    _flops = 0
-    for _bits in ffn_bits:
-        _flops += get_decoder_layer_flops(
-                                          bs=bs,
-                                          kq_dim=kq_dim,
-                                          v_dim=v_dim,
-                                          seq_len=seq_len,
-                                          num_heads=num_heads,
-                                          emb_dim=emb_dim,
-                                          ffn_dim=ffn_dim,
-                                          input_bits=input_bits,
-                                          ffn_bits=_bits,
-                                          num_attns=2,
-                                          )
-
-    return _flops
-
-def get_encoder_flops(
-                      bs=None,
-                      kq_dim=None,
-                      v_dim=None,
-                      seq_len=None,
-                      num_heads=None,
-                      emb_dim=None,
-                      ffn_dim=None,
-                      input_bits=None,
-                      ffn_bits=None,
-                      ):
-    _flops = 0
-    for _bits in ffn_bits:
-        _flops += get_encoder_layer_flops(
-                                          bs=bs,
-                                          kq_dim=kq_dim,
-                                          v_dim=v_dim,
-                                          seq_len=seq_len,
-                                          num_heads=num_heads,
-                                          emb_dim=emb_dim,
-                                          ffn_dim=ffn_dim,
-                                          input_bits=input_bits,
-                                          ffn_bits=_bits,
-                                          num_attns=1,
-                                          )
-
-    return _flops
-
-
-
-
-def get_decoder_layer_flops(
-                      bs=None,
-                      kq_dim=None,
-                      v_dim=None,
-                      seq_len=None,
-                      num_heads=None,
-                      emb_dim=None,
-                      ffn_dim=None,
-                      input_bits=None,
-                      ffn_bits=None,
-                      num_attns=2,
+class FLOPS_COUNTER:
+    def __init__(self, s, emb, heads,
+                       en_self_qks, en_self_vos, en_fcs,
+                       de_self_qks, de_self_vos, de_fcs,
+                       de_encoder_qks, de_encoder_vos,
+                       tar_dict_size,
                         ):
-    assert input_bits in [16, 32]
-    assert ffn_bits in [1, 8, 16, 32]
+        self.s = s # sequence length
+        self.emb = emb # embedding dim
+        self.heads = heads # attention heads
 
-    if ffn_bits == 1:
-        ffn_bits =1 
-    else:
-        ffn_bits = input_bits
-    # print("NUM HEADS: ", num_heads)
-    attn_flops = dict(
-            # Projection 
-            kq_proj = 2*2*emb_dim*kq_dim*num_attns,
-            kq_proj_bias = 2*kq_dim*num_attns,
-            v_proj = 2*emb_dim*v_dim*num_attns,
-            v_proj_bias = 2*v_dim*num_attns,
+        self.en_self_qks = en_self_qks
+        self.en_self_vos = en_self_vos
+        self.en_fcs = en_fcs
 
-            # Attention
-            attn_scores = 2* kq_dim * seq_len * num_attns,
-            attn_softmax = SOFTMAX_FLOPS * seq_len * num_heads * num_attns,
-            attn_dropout = DROPOUT_FLOPS * seq_len * num_heads * num_attns,
-            attn_scale = seq_len * num_heads * num_attns,
-            attn_weighted_avg_values = 2 * emb_dim * seq_len * num_attns,
+        self.de_self_qks = de_self_qks
+        self.de_self_vos = de_self_vos
+        self.de_encoder_qks = de_encoder_qks
+        self.de_encoder_vos = de_encoder_vos
+        self.de_fcs = de_fcs
 
-            # Attn_ouput
-            attn_output = 2 * emb_dim * emb_dim * num_attns,
-            attn_output_bias = emb_dim * num_attns,
-            attn_output_dropout = DROPOUT_FLOPS * emb_dim * num_attns,
-            attn_output_residual = emb_dim * num_attns,
-            attn_output_layer_norm = LAYER_NORM_FLOPS * num_attns,
+        self.tar_dict_size = tar_dict_size
 
-            # FFNs w/o matrix multiplication
-            fc1_act = ACTIVATION_FLOPS * ffn_dim,
-            fc1_bias = ffn_dim,
-            fc2_bias = emb_dim,
-            fc2_dropout = DROPOUT_FLOPS * emb_dim,
-            fc2_residual = emb_dim,
-            fc2_layer_norm = LAYER_NORM_FLOPS * emb_dim,
+    # FLOPs for sub-layers
+    def get_attn_flops(self, qk, vo):
+        # emb, qk, vo: dimensions
+        attn_flops = dict(
+            # projection
+            qk_proj = 2 * 2 * self.emb * qk,
+            qk_bias = 2 * qk,
+            v_proj = 2 * self.emb * vo,
+            v_bias = vo,
+
+            # attention
+            attn_scores = 2 * qk * self.s,
+            attn_softmax = SOFTMAX_FLOPS * self.s * self.heads,
+            attn_dropout = DROPOUT_FLOPS * self.s * self.heads,
+            attn_scale = self.s * self.heads,
+            attn_weight_avg_values = 2 * self.emb * self.s,
+            # attn_output projection
+            attn_output = 2 * self.emb * self.emb,
+            attn_output_bias = self.emb,
+            attn_output_dropout = DROPOUT_FLOPS * self.emb,
+            # residual connection
+            residual = self.emb,
+            # Layer norm
+            layer_norm = LAYER_NORM_FLOPS
+        )
+        return sum(attn_flops.values()) * self.s
+
+    def get_fc_flops(self, fc):
+        # fc: intermediate dimension
+        fc_flops = dict(
+            # first fc layer
+            intermediate = 2 * self.emb * fc,
+            intermediate_act = ACTIVATION_FLOPS * fc,
+            intermediate_bias = fc,
+            # second fc layer
+            output = 2 * fc * self.emb,
+            output_bias = self.emb,
+            output_dropout = DROPOUT_FLOPS * self.emb,
+            # residual
+            output_residual = self.emb,
+            # layernrom
+            output_layer_norm = LAYER_NORM_FLOPS * self.emb,
+        )
+
+        return sum(fc_flops.values()) * self.s
+
+    # FLOPs for a single layer
+    def get_layer_flops(self, self_qk=None, self_vo=None, 
+                        encoder_qk=None, encoder_vo=None, 
+                        fc=None):
+        layer_flops = {}
+        layer_flops['self_attn'] = self.get_attn_flops(
+                                    self_qk, self_vo)
+        if encoder_qk and encoder_vo:                            
+            layer_flops['self_attn'] = self.get_attn_flops(
+                                        self_qk, self_vo)
+        layer_flops['fc'] = self.get_fc_flops(fc)
+        return sum(layer_flops.values())
+
+    def get_encoder_flops(self, self_qks, self_vos, fcs):
+        _tot = 0
+        for i in range(len(self_qks)):
+            _tot += self.get_layer_flops(self_qk=self_qks[i],
+                                         self_vo=self_vos[i],
+                                         fc=fcs[i])
+        return _tot
+
+    def get_decoder_flops(self, self_qks, self_vos, 
+                                encoder_qks, encoder_vos, fcs):
+        _tot = 0
+        for i in range(len(self_qks)):
+            _tot += self.get_layer_flops(self_qk=self_qks[i],
+                                         self_vo=self_vos[i],
+                                         encoder_qk=encoder_qks[i],
+                                         encoder_vo=encoder_vos[i],
+                                         fc=fcs[i])
+        return _tot
+
+    def get_classification_flops(self,):
+        classification_flops = dict(
+            hidden = 2 * self.emb * self.tar_dict_size,
+            hidden_bias = self.tar_dict_size,
             )
+        return sum(classification_flops.values()) * self.s
 
-    ffn_flops = dict(
-            # Matrix multiplications for FFN
-            fc1 = 2 * emb_dim * ffn_dim,
-            fc2 = 2 * ffn_dim * emb_dim,            
-            )
-    attn_flops_count = sum(attn_flops.values())
-    ffn_flops_count = sum(ffn_flops.values())
-    # print(f"{num_attns} | ATTN: {attn_flops_count} | FFN: {ffn_flops_count} | ATTN/FFN: "
-    #        f"{attn_flops_count/ffn_flops_count:.2f}")
-    res = int(attn_flops_count * input_bits/32) + int(ffn_flops_count * ffn_bits/32)
-    res *= (seq_len * bs)
-    return res
+    def get_model_flops(self,):
+        en_flops = self.get_encoder_flops(self.en_self_qks,
+                                          self.en_self_vos,
+                                          self.en_fcs)
+        de_flops = self.get_decoder_flops(self.de_self_qks,
+                                         self.de_self_vos,
+                                         self.de_encoder_qks,
+                                         self.de_encoder_vos,
+                                         self.de_fcs)
+        cls_flops = self.get_classification_flops()
+        return en_flops + de_flops + cls_flops
+
+FLOPs1 = []
+for s in range(1, 128):
+    emb, heads = 512, 4
+    en_self_qks = [512] * 6
+    en_self_vos = [512] * 6
+    en_fcs = [1024] * 6
 
 
+    de_self_qks = [512] * 6
+    de_self_vos = [512] * 6
+    de_encoder_qks = [512] * 6
+    de_encoder_vos = [512] * 6
+    de_fcs = [1024] * 6
+    tar_dict_size = 6632
+                
+    fc1 = FLOPS_COUNTER(s, emb, heads,
+                en_self_qks, en_self_vos, en_fcs,
+                de_self_qks, de_self_vos, de_fcs,
+                de_encoder_qks, de_encoder_vos,
+                tar_dict_size)
+    flops1 = fc1.get_model_flops()
+    FLOPs1.append(flops1)
+f1 = sum(FLOPs1) / 1e9
 
-def get_encoder_layer_flops(**kwargs):
-    return get_decoder_layer_flops(**kwargs)
+FLOPs2 = []
+for s in range(1, 128):
+    emb, heads = 200, 4
+    en_self_qks = [200] * 6
+    en_self_vos = [200] * 6
+    en_fcs = [380] * 6
 
 
-def get_embedding_flops():
-    pass
+    de_self_qks = [200] * 6
+    de_self_vos = [200] * 6
+    de_encoder_qks = [200] * 6
+    de_encoder_vos = [200] * 6
+    de_fcs = [380] * 6
+    tar_dict_size = 6632
+                
+    fc2 = FLOPS_COUNTER(s, emb, heads,
+                en_self_qks, en_self_vos, en_fcs,
+                de_self_qks, de_self_vos, de_fcs,
+                de_encoder_qks, de_encoder_vos,
+                tar_dict_size)
+    flops2 = fc2.get_model_flops()
+    FLOPs2.append(flops2)
+f2 = sum(FLOPs2) / 1e9
+print("* FLOPs")
+print(f"- Base model: {f1:.2f}G")
+print(f"- Comp. model: {f2:.2f}G")
+print(f"- Comp. rate: {f2/f1*100:.2f}%")
+
 
 """
-                bs=None,
-                kq_dim=None,
-                v_dim=None,
-                seq_len=None,
-                num_heads=None,
-                emb_dim=None,
-                ffn_dim=None,
-                input_bits=None,
-                encoder_bits=None,
-                decoder_bits=None,
+s, emb, heads = 128, 512, 4
+en_self_qks = [512] * 6
+en_self_vos = [512] * 6
+en_fcs = [1024] * 6
+
+
+de_self_qks = [512] * 6
+de_self_vos = [512] * 6
+de_encoder_qks = [512] * 6
+de_encoder_vos = [512] * 6
+de_fcs = [1024] * 6
+tar_dict_size = 6632
+            
+fc1 = FLOPS_COUNTER(s, emb, heads,
+              en_self_qks, en_self_vos, en_fcs,
+              de_self_qks, de_self_vos, de_fcs,
+              de_encoder_qks, de_encoder_vos,
+              tar_dict_size)
+flops1 = fc1.get_model_flops()
+
+print(flops1 / 1e9)
+
+
+s, emb, heads = 128, 200, 4
+en_self_qks = [200] * 6
+en_self_vos = [200] * 6
+en_fcs = [380] * 6
+
+
+de_self_qks = [200] * 6
+de_self_vos = [200] * 6
+de_encoder_qks = [200] * 6
+de_encoder_vos = [200] * 6
+de_fcs = [380] * 6
+tar_dict_size = 6632
+            
+fc2 = FLOPS_COUNTER(s, emb, heads,
+              en_self_qks, en_self_vos, en_fcs,
+              de_self_qks, de_self_vos, de_fcs,
+              de_encoder_qks, de_encoder_vos,
+              tar_dict_size)
+flops2 = fc2.get_model_flops()
+
+print(flops2 / 1e9)
+
+print(flops1/flops2)
 """
-
-####################### Computing FLOPs END  ###########################
-
-# kqv  o proj: attn_bits
-# ffn 1, 2: ffn_bits
-
-
-
-
-def get_params(
-                      kq_dim=None,
-                      v_dim=None,
-                      num_heads=None,
-                      emb_dim=None,
-                      ffn_dim=None,
-                      in_voca_size=None,
-                      out_voca_size=None,
-                      
-                      emb_bits=None,
-                      en_attn_bits=None,
-                      en_ffn_bits=None,
-                      de_attn_bits=None,
-                      de_ffn_bits=None,
-                      **kwargs,
-                      ):
-    emb_params = get_emb_params(emb_dim=emb_dim, voca_size=in_voca_size,
-                                emb_bits=emb_bits)
-    en_params = get_module_params(kq_dim, v_dim,
-                                  num_heads, emb_dim, ffn_dim,
-                                  en_attn_bits, en_ffn_bits, 1)
-    de_params = get_module_params(kq_dim, v_dim,
-                                  num_heads, emb_dim, ffn_dim,
-                                  de_attn_bits, de_ffn_bits, 2)
-    output_params = out_voca_size * emb_dim
-    return emb_params + en_params + de_params + output_params
-
-
-
-
-def get_module_params(
-                      kq_dim=None,
-                      v_dim=None,
-                      num_heads=None,
-                      emb_dim=None,
-                      ffn_dim=None,
-
-                      attn_bits=None,
-                      ffn_bits=None,
-                      num_attns=None,
-                      ):
-    res = 0
-    for a_bits, f_bits in zip(attn_bits, ffn_bits):
-        res += get_layer_params(kq_dim, v_dim,
-                                num_heads, emb_dim, ffn_dim,
-                                a_bits, f_bits, num_attns)
-    return res
-
-
-
-def get_layer_params(
-                      kq_dim=None,
-                      v_dim=None,
-                      num_heads=None,
-                      emb_dim=None,
-                      ffn_dim=None,
-
-                      attn_bits=None,
-                      ffn_bits=None,
-                      num_attns=None,
-                      ):
-    assert attn_bits in [1, 8, 16, 32]
-    assert ffn_bits in [1, 8, 16, 32]
-
-
-    attn_params = dict(
-            # Projection 
-            kq_proj = (kq_dim + 1) * emb_dim * 2,
-            v_proj = (v_dim + 1) * emb_dim,
-
-            # Attn_ouput
-            attn_output = (emb_dim + 1) * emb_dim,
-            )
-
-    ffn_params = dict(
-            # Matrix multiplications for FFN
-            fc1 = (emb_dim + 1) * ffn_dim,
-            fc2 = (ffn_dim + 1) * emb_dim,            
-            )
-
-    attn_params_count = int(sum(attn_params.values()) * attn_bits/32) * num_attns
-    ffn_params_count = int(sum(ffn_params.values()) * ffn_bits/32)
-
-    res = attn_params_count + ffn_params_count
-    return res
-
-def get_emb_params(emb_dim, voca_size, emb_bits):
-    assert emb_bits in [1, 8, 16, 32]
-    emb_params = dict(
-            emb=emb_dim * voca_size
-    )
-    emb_params_count = int(sum(emb_params.values()) * emb_bits/32)
-    return emb_params_count
-
-
-
-tf_dict = dict(
-                        bs=1,
-                        kq_dim= 512,
-                        v_dim= 512,
-                        seq_len= 100,
-                        num_heads= 4,
-                        emb_dim= 512,
-                        ffn_dim= 1024,
-
-                        in_voca_size=8848,
-                        out_voca_size=6632,
-
-                        input_bits = 32,
-                        encoder_bits = [32]*6,
-                        decoder_bits = [32]*6,
-
-                        emb_bits=32,
-                        en_attn_bits=[32]*6,
-                        de_attn_bits=[32]*6,
-                        en_ffn_bits=[32]*6,
-                        de_ffn_bits=[32]*6,
-
-                       ) 
-sm_dict = dict(
-                        bs=1,
-                        kq_dim= 512,
-                        v_dim= 512,
-                        seq_len= 100,
-                        num_heads= 4,
-                        emb_dim=512,
-                        ffn_dim= 1024,
-
-                        in_voca_size=8848,
-                        out_voca_size=6632,
-
-                        input_bits = 16,
-                        encoder_bits = [8, 8, 16],
-                        decoder_bits = [16, 16, 16],
-
-                        emb_bits=8,
-                        en_attn_bits=[8, 8, 32],
-                        de_attn_bits=[32, 32, 32],
-                        en_ffn_bits=[8, 8, 32],
-                        de_ffn_bits=[32, 32],
-                       )
-              
-sm_dict_orig = dict(
-                        bs=1,
-                        kq_dim= 300,
-                        v_dim= 300,
-                        seq_len= 100,
-                        num_heads= 4,
-                        emb_dim= 300,
-                        ffn_dim= 512,
-
-                        in_voca_size=8848,
-                        out_voca_size=6632,
-
-                        input_bits = 16,
-                        encoder_bits = [8, 1, 1, 16],
-                        decoder_bits = [16, 16, 16, 16],
-
-                        emb_bits=8,
-                        en_attn_bits=[8, 8, 8, 32],
-                        de_attn_bits=[32, 32, 32, 32],
-                        en_ffn_bits=[1, 1, 8, 32],
-                        de_ffn_bits=[32, 32, 32, 32],
-                       )
-
-sm_dict_tf = dict(
-                        bs=1,
-                        kq_dim= 300,
-                        v_dim= 300,
-                        seq_len= 100,
-                        num_heads= 4,
-                        emb_dim= 300,
-                        ffn_dim= 512,
-
-                        in_voca_size=8848,
-                        out_voca_size=6632,
-
-                        input_bits = 32,
-                        encoder_bits = [32]*4,
-                        decoder_bits = [32]*4,
-
-                        emb_bits=32,
-                        en_attn_bits=[32]*4,
-                        de_attn_bits=[32]*4,
-                        en_ffn_bits=[32]*4,
-                        de_ffn_bits=[32]*4,
-
-                       ) 
-"""
-sm_dict = dict(
-                        bs=1,
-                        kq_dim= 416,
-                        v_dim= 416,
-                        seq_len= 100,
-                        num_heads= 4,
-                        emb_dim= 416,
-                        ffn_dim= 640,
-
-                        input_bits = 16,
-                        encoder_bits = [1, 1, 8, 16],
-                        decoder_bits = [16, 16, 16, 16],
-                       )
-"""
-
-
-
-if __name__ == "__main__":
-    tf_flops = get_flops(**tf_dict)
-    sm_flops = get_flops(**sm_dict)
-    tf_params = get_params(**tf_dict)
-    sm_params = get_params(**sm_dict)
-    
-
-    print("* FLOPS: ")
-    print(f"- tf: {tf_flops} | sm: {sm_flops} | "
-          f"tf/sm: {tf_flops/sm_flops:.2f}")
-    print("* PARAMS: ")
-    print(f"- tf: {tf_params} | sm: {sm_params} | "
-          f"tf/sm: {tf_params/sm_params:.2f}")
-    
-
