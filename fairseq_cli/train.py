@@ -179,6 +179,9 @@ def main(cfg: FairseqConfig) -> None:
     train_meter = meters.StopwatchMeter()
     train_meter.start()
 
+    ############## For alternative training ##################
+    setattr(trainer.model, 'phase', 'w')
+    #########################################################
 
     while epoch_itr.next_epoch_idx <= max_epoch:
         if lr <= cfg.optimization.stop_min_lr:
@@ -195,27 +198,43 @@ def main(cfg: FairseqConfig) -> None:
         ##################### SPT  Pruning ##########################
         # Perform pruning
         # Get Group sum
-        gl_dict = get_group_sum(trainer.model)
-        
-        _eps = cfg.common.prune_eps
-        # local_gl_dic --> k:v = local_key: [local_gl, local_count]
-        trainer.model.pruning(gl_dict,  eps=_eps)
-        trainer.optimizer._optimizer.pruning(gl_dict, trainer.model, eps=_eps) 
-        # print pruning status
-        _res = f'{epoch_itr.epoch},'
-        _group_res = group_report(trainer.model, gl_dict)
-        _res += _group_res
-        _res += f',{valid_losses[0]}'
-        print("+"*15, '  Test ', '+'*15)
-        print(_res)
-        _path_list = cfg.checkpoint.save_dir.split('/')
-        _res_file = f'./checkpoints/res_files/{_path_list[-1]}.csv'
-        print(_res_file)
-        print("+"*15, '  Test ', '+'*15)
-        with open(_res_file, 'a') as f:
-            f.write(_res + '\n')
+        phase = getattr(trainer.model, 'phase', 'x')
+        if phase == 'm':
+            # Get pruning mask
+            gl_dict = get_group_sum(trainer.model) 
+            # Load checkpoint (previous weight)
+            print("+++++++++++++ Start Loading +++++++++++++++++++++++++++")
+            extra_state, epoch_itr = checkpoint_utils.load_checkpoint(
+                cfg.checkpoint,
+                trainer,
+                # don't cache epoch iterators for sharded datasets
+                disable_iterator_cache=task.has_sharded_data("train"),
+            )
+            print("+++++++++++++ End Loading +++++++++++++++++++++++++++")
+            # Do pruning (previous weight + current mask) 
+            _eps = cfg.common.prune_eps
+            # local_gl_dic --> k:v = local_key: [local_gl, local_count]
+            trainer.model.pruning(gl_dict,  eps=_eps)
+            trainer.optimizer._optimizer.pruning(gl_dict, trainer.model, eps=_eps) 
+            setattr(trainer.model, 'phase', 'w')
 
-        # Save pruning status (param/ bleu/ groups change)
+        elif phase == 'w':
+            # print pruning status
+            gl_dict = get_group_sum(trainer.model) 
+            _res = f'{epoch_itr.epoch},'
+            _group_res = group_report(trainer.model, gl_dict)
+            _res += _group_res
+            _res += f',{valid_losses[0]}'
+            print("+"*15, '  Test ', '+'*15)
+            print(_res)
+            _path_list = cfg.checkpoint.save_dir.split('/')
+            _res_file = f'./checkpoints/res_files/{_path_list[-1]}.csv'
+            print(_res_file)
+            print("+"*15, '  Test ', '+'*15)
+            with open(_res_file, 'a') as f:
+                f.write(_res + '\n')
+            setattr(trainer.model, 'phase', 'm')
+            # Save pruning status (param/ bleu/ groups change)
 
         ##############################################################
 
@@ -466,10 +485,12 @@ def validate_and_save(
     should_stop |= should_stop_early(cfg, valid_losses[0])
 
     # Save checkpoint
-    if do_save or should_stop:
-        checkpoint_utils.save_checkpoint(
-            cfg.checkpoint, trainer, epoch_itr, valid_losses[0]
-        )
+    phase = getattr(trainer.model, 'phase', 'x')
+    if phase == 'w':
+        if do_save or should_stop:
+            checkpoint_utils.save_checkpoint(
+                cfg.checkpoint, trainer, epoch_itr, valid_losses[0]
+            )
 
     return valid_losses, should_stop
 
