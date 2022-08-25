@@ -237,6 +237,7 @@ class SPTModelBase(FairseqEncoderDecoderModel):
                     _mask = (_gl/_count)>eps
                     if 'fc1' in type:
                         if 'weight' in wb:
+                            """
                             # adjust dropout rate for fc1
                             _ll = _n.split('.')[:-2]+\
                                     ['activation_dropout_module_fc1']
@@ -246,7 +247,7 @@ class SPTModelBase(FairseqEncoderDecoderModel):
                             new_out = torch.sum(_mask).item()
                             _dropout.p = _dropout.p * np.sqrt(new_out/ _out)
                             # adjust dropout rate for fc1 end
-
+                            """
                             set_param(self, _n,
                                       nn.Parameter(_p.data[_mask, :]))
                         else:
@@ -255,6 +256,7 @@ class SPTModelBase(FairseqEncoderDecoderModel):
                     else:
                         # fc2
                         if 'weight' in wb:
+                            """
                             # adjust dropout rate for fc2
                             _ll = _n.split('.')[:-2]+\
                                     ['dropout_module_fc2']
@@ -264,6 +266,7 @@ class SPTModelBase(FairseqEncoderDecoderModel):
                             new_in = torch.sum(_mask).item()
                             _dropout.p = _dropout.p * np.sqrt(new_in/ _in)
                             # adjust dropout rate for fc1 end
+                            """
 
                             set_param(self, _n,
                                       nn.Parameter(_p.data[:, _mask]))
