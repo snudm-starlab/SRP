@@ -344,12 +344,17 @@ class SPTCriterion(FairseqCriterion):
             ignore_index=self.padding_idx,
             reduce=reduce,
         )
-        local_qk_gl_loss, local_vo_gl_loss, local_fc_gl_loss, global_gl_loss = group_lasso_loss(model)
+        phase = getattr(model, 'phase', 'x')
+        if phase == 'm':
+            local_qk_gl_loss, local_vo_gl_loss, local_fc_gl_loss, global_gl_loss = group_lasso_loss(model)
 
-        loss += model.cfg.local_qk_gl * local_qk_gl_loss + \
-                model.cfg.local_vo_gl * local_vo_gl_loss + \
-                model.cfg.local_fc_gl * local_fc_gl_loss + \
-                model.cfg.global_gl * global_gl_loss
+            loss += model.cfg.local_qk_gl * local_qk_gl_loss + \
+                    model.cfg.local_vo_gl * local_vo_gl_loss + \
+                    model.cfg.local_fc_gl * local_fc_gl_loss + \
+                    model.cfg.global_gl * global_gl_loss
+        else:
+            pass
+            
         """
         return local_attn_gl_loss, local_fc_gl_loss, global_gl_loss
         print(f"loss: {loss} | "
