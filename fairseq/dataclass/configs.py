@@ -257,6 +257,20 @@ class CommonConfig(FairseqDataclass):
             "help": "pruning threshold for SPT"
         },
     )
+
+    pruning_target: float = field(
+        default=1.,
+        metadata={
+            "help": "pruning target of SPT. Stop pruning if spt meets"
+        },
+    )
+
+    pretrained_model: str = field(
+        default="None",
+        metadata={
+            "help": "Path of pre-trained model for fine-tuning"
+        },
+    )
     ##############################################################################
 
 
