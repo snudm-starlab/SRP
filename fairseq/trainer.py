@@ -523,6 +523,7 @@ class Trainer(object):
                 # Then user uses the rank to prune a new roberta encoder and save the pruned ckpt manually.
                 # User will fine tune the the new roberta encoder via the ckpt saved above
                 # To get rid of registering different pruned version of Roberta, I use the argument --mha-heads-to-keep to prune the Roberta model into a pruned version which matches the pruned ckpt.
+                """
                 if (
                     safe_hasattr(self.model, "args")
                     and safe_hasattr(self.model.args, "mha_heads_to_keep")
@@ -563,13 +564,13 @@ class Trainer(object):
                         )
                         layer._prune_fc_layer(remove_index=remove_index)
                     logger.info(self.model)
-
+                """
                 self.model.load_state_dict(
                     state["model"], strict=True, model_cfg=self.cfg.model
                 )
                 # save memory for later steps
                 del state["model"]
-                if utils.has_parameters(self.get_criterion()):
+                if utils.has_parameters(self.get_criterion()): 
                     self.get_criterion().load_state_dict(
                         state["criterion"], strict=True
                     )
@@ -582,7 +583,6 @@ class Trainer(object):
                 )
             extra_state = state["extra_state"]
             self._optim_history = state["optimizer_history"]
-
         if last_optim_state is not None and not reset_optimizer:
             # rebuild optimizer after loading model, since params may have changed
             self._build_optimizer()
@@ -608,8 +608,23 @@ class Trainer(object):
                 last_optim_state = self.optimizer.broadcast_global_state_dict(
                     last_optim_state
                 )
+            """
+            ######################## For SPT Debugging ###################
+            print('\n\r', "+"*30)
+            prev_state = last_optim_state
+            curr_state = self.optimizer.state_dict()
 
+            print(len(curr_state['param_groups'][0]['params']))
+            print(len(prev_state['param_groups'][0]['params']))
+            print("+"*30, end='\n')
+            ##############################################################
+            """
+            
+            print('\n\r', "+"*30)
+            print(self.optimizer.state_dict())
             self.optimizer.load_state_dict(last_optim_state, optimizer_overrides)
+            print(self.optimizer.state_dict())
+            print("+"*30, end='\n')
 
             self.set_num_updates(last_optim["num_updates"])
 
