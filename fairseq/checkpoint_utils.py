@@ -18,6 +18,7 @@ from typing import Any, Dict, Optional, Union
 
 import numpy as np
 import torch
+import torch.nn as nn
 from fairseq.data import data_utils
 from fairseq.dataclass.configs import CheckpointConfig
 from fairseq.dataclass.utils import (
@@ -277,6 +278,99 @@ def load_checkpoint(cfg: CheckpointConfig, trainer, **passthrough_args):
 
     return extra_state, epoch_itr
 
+#################### For load SPT ################################
+
+def set_param(_model, _name, new_param):
+    _attrs = _name.split('.')
+    _parent = _model
+    for _attr in _attrs[:-1]:
+        _parent = getattr(_parent, _attr)
+    setattr(_parent, _attrs[-1], new_param)
+
+def get_param(_model, _name):
+    _attrs = _name.split('.')
+    _parent = _model
+    for _attr in _attrs[:-1]:
+        _parent = getattr(_parent, _attr)
+    return getattr(_parent, _attrs[-1])
+
+def load_spt(filename, model):
+    """
+    Initialize SPT model weights
+    *passthrough_args* will be passed through to
+    ``trainer.get_train_iterator``.
+    """
+    print("Load Check point start!!")
+    model_state = load_checkpoint_to_cpu(
+        filename, load_on_all_ranks=False
+        )["model"]	
+    """
+    pretrained_dict = {k: v for k,v in state["model"].items() 
+         if k in trainer.model.state_dict()}
+    """	
+    print("++++++++++++++++++++++++++++++++++++++++++++++++++++++")	
+    _dev= None
+    for _n, _p in model.named_parameters():
+        _c_param = model_state[_n]
+        print("* ", _n)
+        print("- Loaded Param: ", _c_param.shape)
+        print("- Param update: ", model.state_dict()[_n].shape, end=' ==> ')
+        if 'embed_tokens' in _n:
+            set_param(model, _n, nn.Parameter(_c_param.data))
+            if 'decoder.embed_tokens' in _n:
+                model.decoder.output_projection.weight = model.decoder.embed_tokens.weight
+            continue
+        elif 'output_projection' in _n:
+            continue
+
+        if not _dev:
+            _dev = model.state_dict()[_n].device
+
+        with torch.no_grad():
+            set_param(model, _n, nn.Parameter(_c_param.data))        
+            if 'fc' in _n and 'weight' in _n:
+                _out, _in = _c_param.shape
+                _fc = get_param(model, _n[:-7])
+                _fc.in_features = _in
+                _fc.out_features = _out
+                _fc.in_features = _in
+                _fc.out_features = _out 
+        print(model.state_dict()[_n].shape)
+        print()
+    """
+    for _p in model.state_dict():
+        print("* ", _p)
+        _c_param = model_state[_p]
+        print("- Loaded Param: ", _c_param.shape)
+        print("- Param update: ", model.state_dict()[_p].shape, end=' ==> ')
+        if not _dev:
+            _dev = model.state_dict()[_p].device
+        with torch.no_grad():
+            set_param(model, _p, nn.Parameter(_c_param.data))        
+            if 'fc' in _p and 'weight' in _p:
+                _out, _in = _c_param.shape
+                _fc = get_param(model, _p[:-7])
+                _fc.in_features = _in
+                _fc.out_features = _out
+                
+        print(model.state_dict()[_p].shape)
+        print()
+    """
+    model.to(_dev)
+    
+    # for _n, _p in model.named_parameters():
+    #     print(_n, ": ", _p.shape)
+    
+    # To save memory
+    # del model_state
+    # print(model)
+
+    # for _n, _p in model.named_parameters():
+    #     print(_n, ": ", _p.shape)
+
+    return model
+
+################## SPT initialization Ends ############################
 
 def load_checkpoint_to_cpu(path, arg_overrides=None, load_on_all_ranks=False):
     """Loads a checkpoint to CPU (with upgrading for backward compatibility).
