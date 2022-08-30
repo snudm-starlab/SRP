@@ -95,6 +95,17 @@ def main(cfg: FairseqConfig) -> None:
             model = fsdp_wrap(task.build_model(cfg.model))
     else:
         model = task.build_model(cfg.model)
+
+    ############# Perform shaping Model for loading Pruned Model #################
+    # For spt
+    # pass checkpoint path and shaving model
+    pretrained_model = f'{cfg.checkpoint.save_dir}/{cfg.checkpoint.restore_file}'
+    if os.path.isfile(pretrained_model):
+    # if cfg.checkpoint.restore_file == 'checkpoint_best.pt':
+        print("+++++++ Loading pre-trained model for finetuning +++++++")
+        model = checkpoint_utils.load_spt(pretrained_model, model)
+        print("+++++ Loading pre-trained model for finetuning done +++++")
+    ##############################################################################
     criterion = task.build_criterion(cfg.criterion)
     logger.info(model)
     logger.info("task: {}".format(task.__class__.__name__))
@@ -162,12 +173,25 @@ def main(cfg: FairseqConfig) -> None:
 
     # Load the latest checkpoint if one is available and restore the
     # corresponding train iterator
+
+    ##################### For SPT ################################
+    """ # Original Code #
     extra_state, epoch_itr = checkpoint_utils.load_checkpoint(
         cfg.checkpoint,
         trainer,
         # don't cache epoch iterators for sharded datasets
         disable_iterator_cache=task.has_sharded_data("train"),
     )
+    """
+    extra_state, epoch_itr = checkpoint_utils.load_checkpoint(
+        cfg.checkpoint,
+        trainer,
+        # don't cache epoch iterators for sharded datasets
+        disable_iterator_cache=task.has_sharded_data("train"),
+    )
+    ##############################################################
+
+
     if cfg.common.tpu:
         import torch_xla.core.xla_model as xm
 
@@ -178,9 +202,10 @@ def main(cfg: FairseqConfig) -> None:
 
     train_meter = meters.StopwatchMeter()
     train_meter.start()
-
-    ############## For alternative training ##################
-    setattr(trainer.model, 'phase', 'w')
+    
+    ########3############### For STP #######################
+    setattr(trainer.model, 'phase', 'warming-up')
+    # phase: 'pruning' or 'fine-tuning'
     #########################################################
 
     while epoch_itr.next_epoch_idx <= max_epoch:
@@ -196,46 +221,36 @@ def main(cfg: FairseqConfig) -> None:
         valid_losses, should_stop = train(cfg, trainer, task, epoch_itr)
         
         ##################### SPT  Pruning ##########################
-        # Perform pruning
-        # Get Group sum
-        phase = getattr(trainer.model, 'phase', 'x')
-        if phase == 'm':
-            # Get pruning mask
-            gl_dict = get_group_sum(trainer.model) 
-            # Load checkpoint (previous weight)
-            print("+++++++++++++ Start Loading +++++++++++++++++++++++++++")
-            extra_state, epoch_itr = checkpoint_utils.load_checkpoint(
-                cfg.checkpoint,
-                trainer,
-                # don't cache epoch iterators for sharded datasets
-                disable_iterator_cache=task.has_sharded_data("train"),
-            )
-            print("+++++++++++++ End Loading +++++++++++++++++++++++++++")
-            # Do pruning (previous weight + current mask) 
+        phase = getattr(trainer.model, 'phase')
+        gl_dict = get_group_sum(trainer.model) 
+        if phase == 'pruning':
+            # Perform pruning
+            # Get Group sum
             _eps = cfg.common.prune_eps
             # local_gl_dic --> k:v = local_key: [local_gl, local_count]
             trainer.model.pruning(gl_dict,  eps=_eps)
             trainer.optimizer._optimizer.pruning(gl_dict, trainer.model, eps=_eps) 
-            setattr(trainer.model, 'phase', 'w')
+            # Check pruning target
+            _params = np.sum([_p.numel() for _p in trainer.model.parameters()])
+            if _params <= cfg.common.pruning_target:
+                setattr(trainer.model, 'phase', 'fine-tuning')
+        if phase == 'warming-up' and epoch_itr.epoch > 10:
+            setattr(trainer.model, 'phase', 'pruning')
 
-        elif phase == 'w':
-            # print pruning status
-            gl_dict = get_group_sum(trainer.model) 
-            _res = f'{epoch_itr.epoch},'
-            _group_res = group_report(trainer.model, gl_dict)
-            _res += _group_res
-            _res += f',{valid_losses[0]}'
-            print("+"*15, '  Test ', '+'*15)
-            print(_res)
-            _path_list = cfg.checkpoint.save_dir.split('/')
-            _res_file = f'./checkpoints/res_files/{_path_list[-1]}.csv'
-            print(_res_file)
-            print("+"*15, '  Test ', '+'*15)
-            with open(_res_file, 'a') as f:
-                f.write(_res + '\n')
-            setattr(trainer.model, 'phase', 'm')
-            # Save pruning status (param/ bleu/ groups change)
-
+        # print pruning status
+        _res = f'{phase[0]},{epoch_itr.epoch},'
+        _group_res = group_report(trainer.model, gl_dict)
+        _res += _group_res
+        _res += f',{valid_losses[0]}'
+        print("+"*15, '  Test ', '+'*15)
+        print(_res)
+        _path_list = cfg.checkpoint.save_dir.split('/')
+        _res_file = f'./checkpoints/res_files/{_path_list[-1]}.csv'
+        print(_res_file)
+        print("+"*15, '  Test ', '+'*15)
+        with open(_res_file, 'a') as f:
+            f.write(_res + '\n')
+        # Save pruning status (param/ bleu/ groups change)
         ##############################################################
 
         if should_stop:
@@ -485,12 +500,10 @@ def validate_and_save(
     should_stop |= should_stop_early(cfg, valid_losses[0])
 
     # Save checkpoint
-    phase = getattr(trainer.model, 'phase', 'x')
-    if phase == 'w':
-        if do_save or should_stop:
-            checkpoint_utils.save_checkpoint(
-                cfg.checkpoint, trainer, epoch_itr, valid_losses[0]
-            )
+    if do_save or should_stop:
+        checkpoint_utils.save_checkpoint(
+            cfg.checkpoint, trainer, epoch_itr, valid_losses[0]
+        )
 
     return valid_losses, should_stop
 
