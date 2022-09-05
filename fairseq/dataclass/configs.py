@@ -265,10 +265,10 @@ class CommonConfig(FairseqDataclass):
         },
     )
 
-    pretrained_model: str = field(
-        default="None",
+    warming_up: int = field(
+        default=0,
         metadata={
-            "help": "Path of pre-trained model for fine-tuning"
+            "help": "Warming up epochs before pruning"
         },
     )
     ##############################################################################

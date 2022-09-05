@@ -209,6 +209,10 @@ def main(cfg: FairseqConfig) -> None:
     #########################################################
 
     while epoch_itr.next_epoch_idx <= max_epoch:
+        phase = getattr(trainer.model, 'phase')
+        if phase == 'warming-up' and epoch_itr.epoch > cfg.common.warming_up:
+            setattr(trainer.model, 'phase', 'pruning')
+
         if lr <= cfg.optimization.stop_min_lr:
             logger.info(
                 f"stopping training because current learning rate ({lr}) is smaller "
@@ -221,7 +225,6 @@ def main(cfg: FairseqConfig) -> None:
         valid_losses, should_stop = train(cfg, trainer, task, epoch_itr)
         
         ##################### SPT  Pruning ##########################
-        phase = getattr(trainer.model, 'phase')
         gl_dict = get_group_sum(trainer.model) 
         if phase == 'pruning':
             # Perform pruning
@@ -234,8 +237,6 @@ def main(cfg: FairseqConfig) -> None:
             _params = np.sum([_p.numel() for _p in trainer.model.parameters()])
             if _params <= cfg.common.pruning_target:
                 setattr(trainer.model, 'phase', 'fine-tuning')
-        if phase == 'warming-up' and epoch_itr.epoch > 10:
-            setattr(trainer.model, 'phase', 'pruning')
 
         # print pruning status
         _res = f'{phase[0]},{epoch_itr.epoch},'

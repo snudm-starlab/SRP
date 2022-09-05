@@ -620,11 +620,11 @@ class Trainer(object):
             ##############################################################
             """
             
-            print('\n\r', "+"*30)
-            print(self.optimizer.state_dict())
+            # print('\n\r', "+"*30)
+            # print(self.optimizer.state_dict())
             self.optimizer.load_state_dict(last_optim_state, optimizer_overrides)
-            print(self.optimizer.state_dict())
-            print("+"*30, end='\n')
+            # print(self.optimizer.state_dict())
+            # print("+"*30, end='\n')
 
             self.set_num_updates(last_optim["num_updates"])
 
