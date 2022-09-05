@@ -190,6 +190,7 @@ def main(cfg: FairseqConfig) -> None:
         disable_iterator_cache=task.has_sharded_data("train"),
     )
     #################### For SPT analyze #########################
+    
     print('\n' + "+" * 50)
     print("++ Load model Done")
     model = trainer.model
@@ -279,8 +280,28 @@ def main(cfg: FairseqConfig) -> None:
             
     
      
-        
+    print("=============== Optimizer ==========================")
+    _model = trainer.model
+    _opt = trainer.optimizer
+    _numb = 0
+    """
+    for _n , _p in _model.named_parameters():
+        print(f"{_numb} | {_n} | {_p.shape}")
+        _numb += 1
+    """
 
+    # 244
+    _opt_dict = _opt.state_dict()
+    exp_avg = _opt_dict['state'][244]['exp_avg']
+    exp_avg_sq = _opt_dict['state'][244]['exp_avg_sq']
+    # print(_opt_dict['state'][244]['exp_avg_sq'])
+
+    print(f"exp_avg: {torch.mean(exp_avg):.10f} | {torch.std(exp_avg):.10f}")
+    print(f"exp_avg_sq: {torch.mean(exp_avg_sq):.10f} | {torch.std(exp_avg_sq):.10f}")
+
+
+    
+    
     import time
     time.sleep(10000)
 
