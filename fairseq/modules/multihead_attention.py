@@ -308,6 +308,9 @@ class MultiheadAttention(nn.Module):
         attn_mask: Optional[Tensor] = None,
         before_softmax: bool = False,
         need_head_weights: bool = False,
+        qk_c = None,
+        vo_c = None,
+        
     ) -> Tuple[Tensor, Optional[Tensor]]:
         """Input shape: Time x Batch x Channel
 
@@ -344,46 +347,6 @@ class MultiheadAttention(nn.Module):
                 assert value is not None
                 assert src_len, key_bsz == value.shape[:2]
 
-        if (
-            False and  # Don't use for SPT
-            not self.onnx_trace
-            and not is_tpu  # don't use PyTorch version on TPUs
-            and incremental_state is None
-            and not static_kv
-            # A workaround for quantization to work. Otherwise JIT compilation
-            # treats bias in linear module as method.
-            and not torch.jit.is_scripting()
-            # The Multihead attention implemented in pytorch forces strong dimension check
-            # for input embedding dimention and K,Q,V projection dimension.
-            # Since pruning will break the dimension check and it is not easy to modify the pytorch API,
-            # it is preferred to bypass the pytorch MHA when we need to skip embed_dim_check
-            and not self.skip_embed_dim_check
-        ):
-            assert key is not None and value is not None
-            return F.multi_head_attention_forward(
-                query,
-                key,
-                value,
-                self.embed_dim,
-                self.num_heads,
-                torch.empty([0]),
-                torch.cat((self.q_proj.bias, self.k_proj.bias, self.v_proj.bias)),
-                self.bias_k,
-                self.bias_v,
-                self.add_zero_attn,
-                self.dropout_module.p,
-                self.out_proj.weight,
-                self.out_proj.bias,
-                self.training or self.dropout_module.apply_during_inference,
-                key_padding_mask,
-                need_weights,
-                attn_mask,
-                use_separate_proj_weight=True,
-                q_proj_weight=self.q_proj.weight,
-                k_proj_weight=self.k_proj.weight,
-                v_proj_weight=self.v_proj.weight,
-            )
-
         if incremental_state is not None:
             saved_state = self._get_input_buffer(incremental_state)
             if saved_state is not None and "prev_key" in saved_state:
@@ -394,11 +357,13 @@ class MultiheadAttention(nn.Module):
                     key = value = None
         else:
             saved_state = None
+
         if self.q_proj.weight.shape[0] > 0:
             if self.self_attention:
                 q = self.q_proj(query)
                 k = self.k_proj(query)
                 v = self.v_proj(query)
+
             elif self.encoder_decoder_attention:
                 # encoder-decoder attention
                 q = self.q_proj(query)
@@ -424,6 +389,10 @@ class MultiheadAttention(nn.Module):
                 k = self.k_proj(key)
                 v = self.v_proj(value)
             q *= self.scaling
+            ########## For scoring connections ###############
+            if qk_c is not None:
+                k *= qk_c
+            ##################################################
 
             if self.bias_k is not None:
                 assert self.bias_v is not None
@@ -662,7 +631,16 @@ class MultiheadAttention(nn.Module):
             attn = attn.contiguous().view(tgt_len, bsz, vo_dim)
         else:
             attn = attn.transpose(0, 1).contiguous().view(tgt_len, bsz, vo_dim)
+        
+        ############### For scoring connections ########################
+        if vo_c is not None:
+            attn *= vo_c 
+        ################################################################
+
+        # Perform output projection
         attn = self.out_proj(attn)
+
+
         attn_weights: Optional[Tensor] = None
         if need_weights:
             attn_weights = attn_weights_float.view(

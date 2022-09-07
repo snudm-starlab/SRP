@@ -5,8 +5,68 @@
 
 import torch
 import torch.nn as nn
+import torch.nn.init as init
 import torch.nn.functional as F
+from torch import Tensor, Size
+from typing import Union, List, Tuple
+import numbers
+import numpy as np
 
+class CustomLayerNorm(nn.Module):
+    __constants__ = ['normalized_shape', 'eps', 'elementwise_affine']
+    normalized_shape: Tuple[int, ...]
+    eps: float
+    elementwise_affine: bool
+    def __init__(self, normalized_shape, eps=1e-5, \
+                elementwise_affine=True, device=None, dtype=None):
+        factory_kwargs = {'device': device, 'dtype': dtype}
+        super(CustomLayerNorm, self).__init__()
+        if isinstance(normalized_shape, numbers.Integral):
+            normalized_shape = (normalized_shape, )
+        self.normalized_shape = tuple(normalized_shape)
+        self.numel = np.product(self.normalized_shape)
+        self.dim = len(self.normalized_shape)
+        self.eps = eps
+        self.elementwise_affine = elementwise_affine
+        if self.elementwise_affine:
+            self.weight = nn.Parameter(torch.empty(self.normalized_shape, **factory_kwargs))
+            self.bias = nn.Parameter(torch.empty(self.normalized_shape, **factory_kwargs))
+        else:
+            self.register_parameter('weight', None)
+            self.register_parameter('bias', None)
+        self.reset_parameters()
+
+    def reset_parameters(self) -> None:
+        if self.elementwise_affine:
+            init.ones_(self.weight)
+            init.zeros_(self.bias)
+
+    def forward(self, input: Tensor) -> Tensor:
+        assert len(self.normalized_shape) == 1
+        bs, l, emb_dim = input.shape
+
+        mu = (torch.sum(input, dim = -1) / self.numel).view(bs, l, 1)
+        _sum = torch.sum((input - mu) ** 2, dim=-1)  + (mu**2).squeeze(2) * (self.numel-emb_dim) 
+        sigma = (torch.sqrt(_sum / self.numel)).view(bs, l, 1)
+        
+        norm_emb = (input - mu) / (sigma + self.eps)
+        return norm_emb * self.weight + self.bias
+    
+    def extra_repr(self, ) -> str:
+        return '{normalized_shape}, eps={eps}, '\
+                'elementwise_affine={elementwise_affine}'.format(**self.__dict__)
+        
+
+
+
+
+
+def LayerNorm(normalized_shape, eps=1e-5, elementwise_affine=True, export=False):
+    return CustomLayerNorm(normalized_shape, eps, elementwise_affine)
+
+
+
+"""
 try:
     from apex.normalization import FusedLayerNorm as _FusedLayerNorm
 
@@ -31,7 +91,7 @@ def LayerNorm(normalized_shape, eps=1e-5, elementwise_affine=True, export=False)
     if not export and torch.cuda.is_available() and has_fused_layernorm:
         return FusedLayerNorm(normalized_shape, eps, elementwise_affine)
     return torch.nn.LayerNorm(normalized_shape, eps, elementwise_affine)
-
+"""
 
 class Fp32LayerNorm(nn.LayerNorm):
     def __init__(self, *args, **kwargs):
@@ -46,3 +106,4 @@ class Fp32LayerNorm(nn.LayerNorm):
             self.eps,
         )
         return output.type_as(input)
+
