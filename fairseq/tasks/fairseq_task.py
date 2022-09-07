@@ -483,7 +483,8 @@ class FairseqTask(object):
         )
 
     def train_step(
-        self, sample, model, criterion, optimizer, update_num, ignore_grad=False
+        self, sample, model, criterion, optimizer, update_num, ignore_grad=False,
+        scoring=False
     ):
         """
         Do forward and backward, and return the loss as computed by *criterion*
@@ -505,11 +506,14 @@ class FairseqTask(object):
                   gradient
                 - logging outputs to display while training
         """
-        model.train()
+        if scoring:
+            model.eval()
+        else:
+            model.train()
         model.set_num_updates(update_num)
         with torch.autograd.profiler.record_function("forward"):
             with torch.cuda.amp.autocast(enabled=(isinstance(optimizer, AMPOptimizer))):
-                loss, sample_size, logging_output = criterion(model, sample)
+                loss, sample_size, logging_output = criterion(model, sample, scoring=scoring)
         if ignore_grad:
             loss *= 0
         with torch.autograd.profiler.record_function("backward"):

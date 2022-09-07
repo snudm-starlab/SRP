@@ -59,8 +59,8 @@ class SPTEncoderBase(FairseqEncoder):
 
         embed_dim = embed_tokens.embedding_dim
         ################ For SPT ####################
-        self.alpha = nn.Parameter(torch.ones(embed_dim)
-                                 , requires_grad=True)
+        self.embedding_c = nn.Parameter(torch.ones(embed_dim)
+                                       , requires_grad=True)
         #############################################
 
 
@@ -145,6 +145,7 @@ class SPTEncoderBase(FairseqEncoder):
         src_lengths: Optional[torch.Tensor] = None,
         return_all_hiddens: bool = False,
         token_embeddings: Optional[torch.Tensor] = None,
+        scoring: bool = False,
     ):
         """
         Args:
@@ -170,7 +171,7 @@ class SPTEncoderBase(FairseqEncoder):
                   Only populated if *return_all_hiddens* is True.
         """
         return self.forward_scriptable(
-            src_tokens, src_lengths, return_all_hiddens, token_embeddings
+            src_tokens, src_lengths, return_all_hiddens, token_embeddings, scoring
         )
 
     # TorchScript doesn't support super() method so that the scriptable Subclass
@@ -183,6 +184,7 @@ class SPTEncoderBase(FairseqEncoder):
         src_lengths: Optional[torch.Tensor] = None,
         return_all_hiddens: bool = False,
         token_embeddings: Optional[torch.Tensor] = None,
+        scoring: bool = False,
     ):
         """
         Args:
@@ -214,7 +216,8 @@ class SPTEncoderBase(FairseqEncoder):
         x, encoder_embedding = self.forward_embedding(src_tokens, token_embeddings)
 
         ############## For SPT #######################
-        x = x * self.alpha
+        if scoring:
+            x = x * self.embedding_c
         ##############################################
 
         # account for padding while computing the representation
@@ -233,7 +236,8 @@ class SPTEncoderBase(FairseqEncoder):
         # encoder layers
         for layer in self.layers:
             lr = layer(
-                x, encoder_padding_mask=encoder_padding_mask if has_pads else None
+                x, encoder_padding_mask=encoder_padding_mask if has_pads else None,
+                scoring=scoring
             )
 
             if isinstance(lr, tuple) and len(lr) == 2:

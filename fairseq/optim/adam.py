@@ -258,6 +258,8 @@ class Adam(torch.optim.Optimizer):
             _n = named_params[_i][0]
             if 'embed_tokens' in _n or 'layer_norm' in _n or 'alpha' in _n:
                 pass
+            elif '_c' in _n:
+                pass
             else:
                 ende, ly, type, wb = _parsing(_n)
                 num_heads = en_heads if ende=='encoder' else de_heads

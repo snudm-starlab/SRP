@@ -271,6 +271,13 @@ class CommonConfig(FairseqDataclass):
             "help": "Warming up epochs before pruning"
         },
     )
+
+    c_init: float = field(
+        default=1.,
+        metadata={
+            "help": "Value of connection parameter"
+        },
+    )
     ##############################################################################
 
 

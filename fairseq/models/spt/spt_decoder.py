@@ -72,8 +72,8 @@ class SPTDecoderBase(FairseqIncrementalDecoder):
         embed_dim = cfg.decoder.embed_dim
 
         #################### For SPT ######################
-        self.alpha = nn.Parameter(torch.ones(embed_dim),
-                                 requires_grad=True)
+        self.embedding_c = nn.Parameter(torch.ones(embed_dim),
+                                     requires_grad=True)
         ###################################################
 
 
@@ -201,6 +201,7 @@ class SPTDecoderBase(FairseqIncrementalDecoder):
         alignment_heads: Optional[int] = None,
         src_lengths: Optional[Any] = None,
         return_all_hiddens: bool = False,
+        scoring: bool = False,
     ):
         """
         Args:
@@ -228,9 +229,12 @@ class SPTDecoderBase(FairseqIncrementalDecoder):
             full_context_alignment=full_context_alignment,
             alignment_layer=alignment_layer,
             alignment_heads=alignment_heads,
+            scoring=scoring,
         )
 
         if not features_only:
+            if scoring:
+                x *= self.embedding_c
             x = self.output_layer(x)
         return x, extra
 
@@ -242,6 +246,7 @@ class SPTDecoderBase(FairseqIncrementalDecoder):
         full_context_alignment: bool = False,
         alignment_layer: Optional[int] = None,
         alignment_heads: Optional[int] = None,
+        scoring: bool = False,
     ):
         return self.extract_features_scriptable(
             prev_output_tokens,
@@ -250,6 +255,7 @@ class SPTDecoderBase(FairseqIncrementalDecoder):
             full_context_alignment,
             alignment_layer,
             alignment_heads,
+            scoring=scoring
         )
 
     """
@@ -266,6 +272,7 @@ class SPTDecoderBase(FairseqIncrementalDecoder):
         full_context_alignment: bool = False,
         alignment_layer: Optional[int] = None,
         alignment_heads: Optional[int] = None,
+        scoring: bool = False,
     ):
         """
         Similar to *forward* but only return features.
@@ -327,7 +334,8 @@ class SPTDecoderBase(FairseqIncrementalDecoder):
         x = self.dropout_module(x)
 
         ################### For SPT ########################
-        x = x * self.alpha        
+        if scoring:
+            x = x * self.embedding_c
         ####################################################
 
 
@@ -356,6 +364,7 @@ class SPTDecoderBase(FairseqIncrementalDecoder):
                 self_attn_padding_mask=self_attn_padding_mask,
                 need_attn=bool((idx == alignment_layer)),
                 need_head_weights=bool((idx == alignment_layer)),
+                scoring=scoring
             )
             inner_states.append(x)
             if layer_attn is not None and idx == alignment_layer:
@@ -375,6 +384,8 @@ class SPTDecoderBase(FairseqIncrementalDecoder):
         x = x.transpose(0, 1)
 
         if self.project_out_dim is not None:
+            # if scoring:
+            #     x *= self.embedding_c
             x = self.project_out_dim(x)
 
         return x, {"attn": [attn], "inner_states": inner_states}

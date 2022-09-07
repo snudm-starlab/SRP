@@ -375,11 +375,22 @@ def train(
     should_stop = False
     num_updates = trainer.get_num_updates()
     logger.info("Start iterating over samples")
+
+    scoring=True
     for i, samples in enumerate(progress):
         with metrics.aggregate("train_inner"), torch.autograd.profiler.record_function(
             "train_step-%d" % i
         ):
-            log_output = trainer.train_step(samples)
+            log_output = trainer.train_step(samples, scoring=scoring)
+
+        if scoring:
+            # Scoring groups at the beginning of every epoch
+            scoring_groups(trainer.model)
+            trainer.model.zero_grad()
+            trainer.zero_grad()
+            scoring=False
+            continue
+
 
         if log_output is not None:  # not OOM, overflow, ...
             # log mid-epoch stats
@@ -433,7 +444,15 @@ def _flatten_config(cfg: DictConfig):
     if namespace is not None:
         config["args"] = vars(namespace)
     return config
+############### Scoring groups for SPT ######################
 
+def scoring_groups(model):
+    print(" =============== Scoring ===============")
+    for _n, _p in model.named_parameters():
+        if 'fc_c' in _n:
+            print("*", _n, ": ", torch.mean(_p.grad))
+            
+##############################################################
 
 def validate_and_save(
     cfg: DictConfig,

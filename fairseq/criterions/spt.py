@@ -78,6 +78,8 @@ def get_group_sum(model):
     for _n, _p in model.named_parameters():
         if 'embed_tokens' in _n:
             continue
+        elif '_c' in _n:
+            continue
         elif 'layer_norm' in _n or 'alpha' in _n:
             _key = 'global'
             _gl = _p * _p
@@ -300,7 +302,7 @@ class SPTCriterion(FairseqCriterion):
         self.ignore_prefix_size = ignore_prefix_size
         self.report_accuracy = report_accuracy
 
-    def forward(self, model, sample, reduce=True):
+    def forward(self, model, sample, reduce=True, scoring=False):
         """Compute the loss for the given sample.
 
         Returns a tuple with three elements:
@@ -308,8 +310,8 @@ class SPTCriterion(FairseqCriterion):
         2) the sample size, which is used as the denominator for the gradient
         3) logging outputs to display while training
         """
-        net_output = model(**sample["net_input"])
-        loss, nll_loss = self.compute_loss(model, net_output, sample, reduce=reduce)
+        net_output = model(**sample["net_input"], scoring=scoring)
+        loss, nll_loss = self.compute_loss(model, net_output, sample, reduce=reduce, scoring=scoring)
         sample_size = (
             sample["target"].size(0) if self.sentence_avg else sample["ntokens"]
         )
@@ -335,7 +337,7 @@ class SPTCriterion(FairseqCriterion):
             target = target[:, self.ignore_prefix_size :].contiguous()
         return lprobs.view(-1, lprobs.size(-1)), target.view(-1)
 
-    def compute_loss(self, model, net_output, sample, reduce=True):
+    def compute_loss(self, model, net_output, sample, reduce=True, scoring=False):
         lprobs, target = self.get_lprobs_and_target(model, net_output, sample)
         loss, nll_loss = label_smoothed_nll_loss(
             lprobs,
@@ -345,7 +347,7 @@ class SPTCriterion(FairseqCriterion):
             reduce=reduce,
         )
         phase = getattr(model, 'phase', 'x')
-        if phase == 'pruning':
+        if phase == 'pruning' and not scoring:
             local_qk_gl_loss, local_vo_gl_loss, local_fc_gl_loss, global_gl_loss = group_lasso_loss(model)
 
             loss += model.cfg.local_qk_gl * local_qk_gl_loss + \

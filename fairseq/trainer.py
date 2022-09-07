@@ -791,11 +791,15 @@ class Trainer(object):
         self._dummy_batch = batch
 
     @metrics.aggregate("train")
-    def train_step(self, samples, raise_oom=False):
+    def train_step(self, samples, raise_oom=False, scoring=False):
         """Do forward, backward and parameter update."""
         self._set_seed()
-        self.model.train()
-        self.criterion.train()
+        if scoring:
+            self.model.eval()
+            self.criterion.eval()
+        else:
+            self.model.train()
+            self.criterion.train()
         self.zero_grad()
 
         metrics.log_start_time("train_wall", priority=800, round=0)
@@ -842,8 +846,10 @@ class Trainer(object):
                         optimizer=self.optimizer,
                         update_num=self.get_num_updates(),
                         ignore_grad=is_dummy_batch,
+                        scoring=scoring,
                         **extra_kwargs,
                     )
+ 
                     del loss
 
                 logging_outputs.append(logging_output)
@@ -960,20 +966,22 @@ class Trainer(object):
                         # check local gradnorm single GPU case, trigger NanDetector
                         raise FloatingPointError("gradients are Nan/Inf")
 
-            with torch.autograd.profiler.record_function("optimizer"):
-                # take an optimization step
-                self.task.optimizer_step(
-                    self.optimizer, model=self.model, update_num=self.get_num_updates()
-                )
-                if self.cfg.common.amp and overflow:
-                    if self._amp_retries == self.cfg.common.amp_batch_retries:
-                        logger.info("AMP: skipping this batch.")
-                        self._amp_retries = 0
-                    else:
-                        self._amp_retries += 1
-                        return self.train_step(
-                            samples, raise_oom
-                        )  # recursion to feed in same batch
+            #### Perform optimizer step
+            if not scoring:
+                with torch.autograd.profiler.record_function("optimizer"):
+                    # take an optimization step
+                    self.task.optimizer_step(
+                        self.optimizer, model=self.model, update_num=self.get_num_updates()
+                    )
+                    if self.cfg.common.amp and overflow:
+                        if self._amp_retries == self.cfg.common.amp_batch_retries:
+                            logger.info("AMP: skipping this batch.")
+                            self._amp_retries = 0
+                        else:
+                            self._amp_retries += 1
+                            return self.train_step(
+                                samples, raise_oom
+                            )  # recursion to feed in same batch
 
         except FloatingPointError:
 
