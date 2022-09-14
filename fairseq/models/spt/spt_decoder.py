@@ -72,6 +72,7 @@ class SPTDecoderBase(FairseqIncrementalDecoder):
         embed_dim = cfg.decoder.embed_dim
 
         #################### For SPT ######################
+        self.alpha = nn.Parameter(torch.ones(embed_dim))
         self.embedding_c = nn.Parameter(torch.ones(embed_dim),
                                      requires_grad=True)
         ###################################################
@@ -202,6 +203,7 @@ class SPTDecoderBase(FairseqIncrementalDecoder):
         src_lengths: Optional[Any] = None,
         return_all_hiddens: bool = False,
         scoring: bool = False,
+        pos_emb_mask = None,
     ):
         """
         Args:
@@ -230,6 +232,7 @@ class SPTDecoderBase(FairseqIncrementalDecoder):
             alignment_layer=alignment_layer,
             alignment_heads=alignment_heads,
             scoring=scoring,
+            pos_emb_mask=pos_emb_mask,
         )
 
         if not features_only:
@@ -247,6 +250,7 @@ class SPTDecoderBase(FairseqIncrementalDecoder):
         alignment_layer: Optional[int] = None,
         alignment_heads: Optional[int] = None,
         scoring: bool = False,
+        pos_emb_mask=None,
     ):
         return self.extract_features_scriptable(
             prev_output_tokens,
@@ -255,7 +259,8 @@ class SPTDecoderBase(FairseqIncrementalDecoder):
             full_context_alignment,
             alignment_layer,
             alignment_heads,
-            scoring=scoring
+            scoring=scoring,
+            pos_emb_mask=pos_emb_mask,
         )
 
     """
@@ -273,6 +278,7 @@ class SPTDecoderBase(FairseqIncrementalDecoder):
         alignment_layer: Optional[int] = None,
         alignment_heads: Optional[int] = None,
         scoring: bool = False,
+        pos_emb_mask=None,
     ):
         """
         Similar to *forward* but only return features.
@@ -326,10 +332,15 @@ class SPTDecoderBase(FairseqIncrementalDecoder):
             x = self.project_in_dim(x)
 
         if positions is not None:
-            x += positions
+            if pos_emb_mask is not None:
+                x += positions[:,:,pos_emb_mask]
+            else:
+                x += positions
 
         if self.layernorm_embedding is not None:
             x = self.layernorm_embedding(x)
+
+        x *= self.alpha
 
         x = self.dropout_module(x)
 

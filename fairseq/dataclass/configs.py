@@ -257,11 +257,25 @@ class CommonConfig(FairseqDataclass):
             "help": "pruning threshold for SPT"
         },
     )
-
+    
     pruning_target: float = field(
-        default=1.,
+        default=0.2,
         metadata={
-            "help": "pruning target of SPT. Stop pruning if spt meets"
+            "help": "Target compression rate. Stop pruning if spt meets this"
+        },
+    )
+
+    compression_rate: float = field(
+        default=0.2,
+        metadata={
+            "help": "Target compression rate. Stop pruning if spt meets this"
+        },
+    )
+
+    pruning_epochs: int = field(
+        default=40,
+        metadata={
+            "help": "number of epochs for pruning after warming-up epochs"
         },
     )
 

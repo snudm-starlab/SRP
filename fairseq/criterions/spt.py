@@ -49,6 +49,11 @@ class SPTConfig(FairseqDataclass):
         metadata={"help": "coefficient for global group lasso regularization"},
     )
 
+    l2: float = field(
+        default=10,
+        metadata={"help": "coefficient for l2 regularization"},
+    )
+
 
 def label_smoothed_nll_loss(lprobs, target, epsilon, ignore_index=None, reduce=True):
     if target.dim() == lprobs.dim() - 1:
@@ -271,9 +276,9 @@ def group_lasso_loss(model):
     return local_qk_gl_loss, local_vo_gl_loss, local_fc_gl_loss, global_gl_loss
 
 def _parsing(_name):
-    assert 'embed_tokens' not in _name and 'layer_norm' not in _name
+    assert 'embed_tokens' not in _name
     _l = _name.split('.')
-    if 'attn' in _name:
+    if 'attn' in _name and 'layer_norm' not in _name:
         ende, ly, type, wb = _l[0], _l[2], f'{_l[3]}.{_l[4]}',_l[5]
     else:
         try:
@@ -281,6 +286,152 @@ def _parsing(_name):
         except Exception:
             print("* Name: ", _name)
     return ende, ly, type, wb
+
+def update_loss(loss, new_loss):
+    if loss is None:
+        loss = new_loss
+    else:
+        loss += new_loss
+    return loss
+
+
+def get_l2_loss(model):
+    pm = model.pruning_manager
+    pd = pm.pruning_dict
+
+    en_heads = model.cfg.encoder.attention_heads
+    de_heads = model.cfg.decoder.attention_heads
+    l2_loss = None
+
+    for _n, _p in model.named_parameters():
+        
+        if _n[-2:] == "_c" or 'embed_tokens' in _n:
+            # skip connection parameters
+            continue  
+        elif 'alpha' in _n:
+            ende = _n.split('.')[0]
+            _key = f"{ende}.embedding_c"
+            mask = pd[_key]
+            new_loss = torch.sum( _p[mask] * _p[mask])
+            l2_loss = update_loss(l2_loss, new_loss)
+
+        
+        elif 'layer_norm' in _n:
+            ende, ly, type, wb = _parsing(_n)
+            if 'self' in type:
+                _type = 'self_attn'
+            elif 'encoder' in type:
+                _type = 'encoder_attn'
+            else:
+                _type = 'fc'
+            _key = f"{ende}.layers.{ly}.{_type}_ln_c"
+            mask = pd[_key] if _key in pd else []
+            new_loss = torch.sum(_p[mask] * _p[mask])
+            l2_loss = update_loss(l2_loss, new_loss)
+        elif 'fc' in _n:
+            # fc layers
+            # fc1: (gl_dim, fc_dim) | bias: fc_dim | global: prev_sub
+            # fc2: (fc_dim, gl_dim) | bias: fc_dim | global: prev_sub
+            ende, ly, type, wb = _parsing(_n)
+
+            # Get global and local masks
+            if ende == 'encoder':
+                global_key = f'{ende}.layers.{ly}.self_attn_ln_c'
+            else:
+                # decoder
+                global_key = f'{ende}.layers.{ly}.encoder_attn_ln_c'
+            local_key = f'{ende}.layers.{ly}.fc_c'
+
+            global_mask = pd[global_key] if global_key in pd else []
+            local_mask = pd[local_key] if local_key in pd else []
+
+
+            if 'fc2' in _n:
+                if 'bias' in _n:
+                    new_loss = torch.sum(_p[global_mask] * _p[global_mask])
+                else:
+                    loss_1 = torch.sum(_p[global_mask,:] ** 2)
+                    loss_2 = torch.sum(_p[:,local_mask] ** 2)
+                    loss_3 = torch.sum(_p[global_mask,:][:,local_mask] ** 2)
+                    new_loss = loss_1 + loss_2 - loss_3 
+            else:
+                if 'bias' in _n:
+                    new_loss = torch.sum(_p[local_mask] * _p[local_mask])
+                else:
+                    # print(f"* {_n}: {_p.shape} | {local_mask} {local_mask.shape}")
+                    # print(_n)
+                    # print(_p.shape)
+                    # print(local_mask)
+                    loss_1 = torch.sum(_p[:,global_mask] ** 2)
+                    loss_2 = torch.sum(_p[local_mask,:] ** 2)
+                    loss_3 = torch.sum(_p[local_mask,:][:,global_mask] ** 2)
+                    new_loss = loss_1 + loss_2 - loss_3
+            l2_loss = update_loss(l2_loss, new_loss)
+            # print(" ******* ", _n, " Ends")
+
+        else:
+            # qkvo_proj
+            # q: (qk_dim, gl_dim) | bias: qk_dim | global: 
+            # k: (qk_dim, gl_dim) | bias: qk_dim | global: 
+            # v: (vo_dim, gl_dim) | bias: vo_dim | global: 
+            # o: (gl_dim, vo_dim) | bias: gl_dim | global: previous sub-layer ln_c
+            
+            ende, ly, type, wb = _parsing(_n)
+            # Get global and local masks
+            if 'self_attn' in _n:
+                if ly == '0':
+                    global_key = f'{ende}.embedding_c'
+                else:
+                    global_key = f'{ende}.layers.{int(ly)-1}.fc_ln_c'
+                if 'q_proj' in _n or 'k_proj' in _n:
+                    local_key = f'{ende}.layers.{ly}.self_attn_qk_c'
+                else:
+                    local_key = f'{ende}.layers.{ly}.self_attn_vo_c'
+            else:
+                # encoder_attn
+                global_key = f'{ende}.layers.{ly}.self_attn_ln_c'
+                if 'q_proj' in _n or 'k_proj' in _n:
+                    local_key = f'{ende}.layers.{ly}.encoder_attn_qk_c'
+                else:
+                    local_key = f'{ende}.layers.{ly}.encoder_attn_vo_c'
+
+            # q: (qk_dim, gl_dim) | bias: qk_dim | global: 
+            # k: (qk_dim, gl_dim) | bias: qk_dim | global: 
+            # v: (vo_dim, gl_dim) | bias: vo_dim | global: 
+            # o: (gl_dim, vo_dim) | bias: gl_dim | global: previous sub-layer ln_c
+            
+            if global_key in pd:
+                global_mask = pd[global_key]
+            else:
+                global_mask = []
+            if local_key in pd:
+                local_mask = pd[local_key]
+            else:
+                local_mask = []
+
+            # Compute loss 
+            if 'out_proj' in _n:
+                if 'bias' in _n:
+                    new_loss = torch.sum(_p[global_mask] * _p[global_mask])
+                else:
+                    loss_1 = torch.sum(_p[global_mask,:] ** 2)
+                    loss_2 = torch.sum(_p[:,local_mask] ** 2)
+                    loss_3 = torch.sum(_p[global_mask,:][:,local_mask] ** 2)
+                    new_loss = loss_1 + loss_2 - loss_3 
+                    # new_loss = loss_1 + loss_2
+            else:
+                if 'bias' in _n:
+                    new_loss = torch.sum(_p[local_mask] * _p[local_mask])
+                else:
+                    loss_1 = torch.sum(_p[:,global_mask] ** 2)
+                    loss_2 = torch.sum(_p[local_mask,:] ** 2)
+                    loss_3 = torch.sum(_p[local_mask,:][:,global_mask] ** 2)
+                    new_loss = loss_1 + loss_2 - loss_3
+                    # new_loss = loss_1 + loss_2
+            l2_loss = update_loss(l2_loss, new_loss)
+    return l2_loss
+
+
 
 # For SPT end
 
@@ -348,12 +499,16 @@ class SPTCriterion(FairseqCriterion):
         )
         phase = getattr(model, 'phase', 'x')
         if phase == 'pruning' and not scoring:
+            loss += model.cfg.l2 * get_l2_loss(model)
+            
+            '''
             local_qk_gl_loss, local_vo_gl_loss, local_fc_gl_loss, global_gl_loss = group_lasso_loss(model)
 
             loss += model.cfg.local_qk_gl * local_qk_gl_loss + \
                     model.cfg.local_vo_gl * local_vo_gl_loss + \
                     model.cfg.local_fc_gl * local_fc_gl_loss + \
                     model.cfg.global_gl * global_gl_loss
+            '''
             
         """
         return local_attn_gl_loss, local_fc_gl_loss, global_gl_loss

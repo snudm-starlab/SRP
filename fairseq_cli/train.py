@@ -204,14 +204,83 @@ def main(cfg: FairseqConfig) -> None:
     train_meter.start()
     
     ########3############### For STP #######################
+    class PruningManager():
+        def __init__(self, cfg): 
+            self.P = 1 - np.sqrt(cfg.common.compression_rate)
+            self.n = cfg.common.pruning_epochs
+            self.p = 1 - (1-self.P) ** (1/cfg.common.pruning_epochs)
+            
+            self.GLE = 512
+            self.GLD = 512
+            self.FC = 1024 * 12
+            self.QK = 128 * 18
+            self.VO = 128 * 18
+            self.count = 0
+
+            self.pruning_dict = None
+
+            # For positional embedding
+            self.encoder_orig_dim = 512
+            self.decoder_orig_dim = 512
+
+            self.encoder_indices = torch.arange(self.encoder_orig_dim)
+            self.decoder_indices = torch.arange(self.decoder_orig_dim)
+
+
+        def get(self, ):
+            assert self.count < self.n
+            self.count += 1
+            gle = int(np.ceil(self.GLE * self.p))
+            gld = int(np.ceil(self.GLD * self.p))
+            fc = int(np.ceil(self.FC * self.p))
+            qk = int(np.ceil(self.QK * self.p))
+            vo = int(np.ceil(self.VO * self.p))
+
+            self.GLE -= gle
+            self.GLD -= gld
+            self.FC -= fc
+            self.QK -= qk
+            self.VO -= vo
+            
+            return gle, gld, fc, qk, vo
+
+        def update_embedding_mask(self, emb_mask, ende):
+            # emb_mask: indices for pruning (len: pruned_len)
+            # self.encoder_indices: len: orig_dim
+            # 0, 1, 2, ...... , 511
+            if ende == 'encoder':
+                emb_mask2 = torch.zeros(self.GLE + emb_mask.shape[0]).bool()
+                emb_mask2[emb_mask] = True
+                self.encoder_indices = self.encoder_indices[~emb_mask2]
+            else:
+                emb_mask2 = torch.zeros(self.GLD + emb_mask.shape[0]).bool()
+                emb_mask2[emb_mask] = True
+                self.decoder_indices = self.decoder_indices[~emb_mask2]
+
+        def get_embedding_mask(self, ende, _dev='cpu'):
+            if ende == 'encoder':
+                _mask = torch.zeros(self.encoder_orig_dim).bool()
+                _mask[self.encoder_indices] = True
+            else:
+                _mask = torch.zeros(self.decoder_orig_dim).bool()
+                _mask[self.decoder_indices] = True
+            _mask = _mask.to(_dev)
+            return _mask
+           
+            
+    pm = PruningManager(cfg)
+    setattr(trainer.model, "pruning_manager", pm)
     setattr(trainer.model, 'phase', 'warming-up')
+
+
     # phase: 'pruning' or 'fine-tuning'
     #########################################################
 
     while epoch_itr.next_epoch_idx <= max_epoch:
         phase = getattr(trainer.model, 'phase')
-        if phase == 'warming-up' and epoch_itr.epoch > cfg.common.warming_up:
+        if (phase == 'warming-up') and (epoch_itr.epoch > cfg.common.warming_up):
             setattr(trainer.model, 'phase', 'pruning')
+            phase = getattr(trainer.model, 'phase')
 
         if lr <= cfg.optimization.stop_min_lr:
             logger.info(
@@ -222,35 +291,42 @@ def main(cfg: FairseqConfig) -> None:
             break
 
         # train for one epoch
-        valid_losses, should_stop = train(cfg, trainer, task, epoch_itr)
+        valid_losses, should_stop = train(cfg, trainer, task, epoch_itr, pruning_manager=pm)
         
         ##################### SPT  Pruning ##########################
-        gl_dict = get_group_sum(trainer.model) 
+        # gl_dict = get_group_sum(trainer.model) 
         if phase == 'pruning':
-            # Perform pruning
             # Get Group sum
-            _eps = cfg.common.prune_eps
+            # _eps = cfg.common.prune_eps
             # local_gl_dic --> k:v = local_key: [local_gl, local_count]
-            trainer.model.pruning(gl_dict,  eps=_eps)
-            trainer.optimizer._optimizer.pruning(gl_dict, trainer.model, eps=_eps) 
-            # Check pruning target
-            _params = np.sum([_p.numel() for _p in trainer.model.parameters()])
-            if _params <= cfg.common.pruning_target:
+            trainer.model.pruning()
+            trainer.optimizer._optimizer.pruning(trainer.model)
+            pm.update_embedding_mask(
+                pm.pruning_dict['encoder.embedding_c'], 'encoder')
+            pm.update_embedding_mask(
+                pm.pruning_dict['decoder.embedding_c'], 'decoder')
+            # print(f"# params: {_params}")
+            if epoch_itr.epoch > (cfg.common.warming_up + cfg.common.pruning_epochs):
                 setattr(trainer.model, 'phase', 'fine-tuning')
 
+        # Check pruning target
+        _params = np.sum([_p.numel() for _p in trainer.model.parameters()])
+
         # print pruning status
+        
         _res = f'{phase[0]},{epoch_itr.epoch},'
-        _group_res = group_report(trainer.model, gl_dict)
-        _res += _group_res
-        _res += f',{valid_losses[0]}'
+        # _group_res = group_report(trainer.model, gl_dict)
+        # _res += _group_res
+        _res += f'{_params},{valid_losses[0]}'
         print("+"*15, '  Test ', '+'*15)
         print(_res)
         _path_list = cfg.checkpoint.save_dir.split('/')
         _res_file = f'./checkpoints/res_files/{_path_list[-1]}.csv'
-        print(_res_file)
+        print("Result file:", _res_file)
         print("+"*15, '  Test ', '+'*15)
         with open(_res_file, 'a') as f:
             f.write(_res + '\n')
+        
         # Save pruning status (param/ bleu/ groups change)
         ##############################################################
 
@@ -310,7 +386,7 @@ def should_stop_early(cfg: DictConfig, valid_loss: float) -> bool:
 
 @metrics.aggregate("train")
 def train(
-    cfg: DictConfig, trainer: Trainer, task: tasks.FairseqTask, epoch_itr
+    cfg: DictConfig, trainer: Trainer, task: tasks.FairseqTask, epoch_itr, pruning_manager=None,
 ) -> Tuple[List[Optional[float]], bool]:
     """Train the model for one epoch and return validation losses."""
     # Initialize data iterator
@@ -376,7 +452,11 @@ def train(
     num_updates = trainer.get_num_updates()
     logger.info("Start iterating over samples")
 
-    scoring=True
+    if trainer.model.phase == 'pruning':
+        scoring=True
+    else:
+        scoring=False
+
     for i, samples in enumerate(progress):
         with metrics.aggregate("train_inner"), torch.autograd.profiler.record_function(
             "train_step-%d" % i
@@ -385,7 +465,32 @@ def train(
 
         if scoring:
             # Scoring groups at the beginning of every epoch
-            scoring_groups(trainer.model)
+            gle, gld, fc, qk, vo = pruning_manager.get()
+            print("#######################################")
+            print(gle, gld, fc, qk, vo)
+            # scoring_groups(trainer.model)
+            pruning_dict = {}
+            pruning_dict.update(
+                get_fc_dict(trainer.model, fc)
+            )
+            pruning_dict.update(
+                get_global_dict(trainer.model, gle, "encoder")
+            )
+            pruning_dict.update(
+                get_global_dict(trainer.model, gld, "decoder")
+            )
+            pruning_dict.update(
+                get_qkvo_dict(trainer.model, qk, "qk")
+            )
+            pruning_dict.update(
+                get_qkvo_dict(trainer.model, qk, "vo")
+            )
+
+            # for k in pruning_dict:
+            #     print(k, type(pruning_dict[k]))
+            pruning_manager.pruning_dict = pruning_dict           
+            print("#######################################")
+
             trainer.model.zero_grad()
             trainer.zero_grad()
             scoring=False
@@ -445,12 +550,127 @@ def _flatten_config(cfg: DictConfig):
         config["args"] = vars(namespace)
     return config
 ############### Scoring groups for SPT ######################
-
+'''
 def scoring_groups(model):
     print(" =============== Scoring ===============")
+    _dict = dict(model.named_parameters())
     for _n, _p in model.named_parameters():
-        if 'fc_c' in _n:
+        if 'qk_c' in _n or 'vo_c' in _n:
             print("*", _n, ": ", torch.mean(_p.grad))
+'''
+def get_fc_dict(model, fc):
+    fc_dict = {} # k:v = param_name: pruning indices
+    scores = []
+    for ende in ['encoder', 'decoder']:
+        for ly in range(0,6):
+            _n = f'{ende}.layers.{ly}.fc_c'
+            score = get_attr(model, _n).grad
+            if score is None:
+                continue
+            scores.append(score)
+            # print(_n, score.shape)
+    scores = torch.sort(torch.cat(scores), descending=True)[0]
+    # print(scores.shape)
+    # print(scores[0:50])
+    # print(scores[-50:])
+    thres = scores[fc]
+    # print(thres)
+    # print("###############################")
+    # print("* fc: ", fc)
+    count = 0
+    for ende in ['encoder', 'decoder']:
+        for ly in range(0,6):
+            _n = f'{ende}.layers.{ly}.fc_c'
+            score = get_attr(model, _n).grad
+            if score is None:
+                continue
+            cond = (score > thres)
+            if torch.sum(cond) > 0:
+                # print(_n, torch.where(cond)[0])
+                count += torch.where(cond)[0].shape[0]
+                fc_dict[_n] = torch.where(cond)[0]
+    # print("* count: ", count)
+    return fc_dict
+
+def get_global_dict(model, gl, ende):
+    gl_dict = {} # k:v = param_name: pruning indices
+    module_list = ["self_attn", "fc"]
+    if ende == "decoder":
+        module_list.append("encoder_attn")
+    for module in module_list:
+        for ly in range(6):
+            _n = f"{ende}.layers.{ly}.{module}_ln_c"
+            score = get_attr(model, _n).grad
+            if score is not None:
+                gl_dict[_n] = torch.argsort(score, descending=True)[:gl]
+            # print(_n, gl, torch.argsort(score)[:gl])
+    _n = f"{ende}.embedding_c"
+    score = get_attr(model, _n)
+    gl_dict[_n] = torch.argsort(score, descending=True)[:gl]
+    return gl_dict
+
+def get_qkvo_dict(model, pn, qkvo):
+    pruning_dict = {} # k:v = param_name: pruning indices
+    score_dict = {} # k:v = param_name: score, args_list
+    scores = []
+    for ende in ["encoder", "decoder"]:
+        module_list = ["self_attn"]
+        if ende == "decoder":
+            module_list.append("encoder_attn")
+        for ly in range(6):
+            for module in module_list:
+                _n = f"{ende}.layers.{ly}.{module}_{qkvo}_c"
+                _grad = get_attr(model, _n).grad
+                if _grad is None:
+                    continue
+                _head_dim = _grad.shape[-1]//4
+                score = None
+                # print(f"### _grad shape: {_grad.shape[0]} | _head_dim: {_head_dim}")
+                args_list = []
+                for i in range(4):
+                    temp_grad, _args = torch.sort(_grad[_head_dim*i:_head_dim*(i+1)], descending=True)
+                    # print(f"**** {i}: ", temp_grad.shape, _head_dim)
+                    _args += _head_dim * i
+                    args_list.append(_args)
+                    if score == None:
+                        score = temp_grad
+                    else:
+                        score += temp_grad
+                score_dict[_n] = [score, args_list]
+                scores.append(score)
+    # print("Length of scores: ", len(scores))
+    scores = torch.sort(torch.cat(scores), descending=True)[0]
+    # print("Shape of scores: ", scores.shape)
+    thres = scores[pn]                  
+    # print(thres)
+    # print("* Pruning: ", pn)
+    count = 0
+    for ende in ["encoder", "decoder"]:
+        module_list = ["self_attn"]
+        if ende == "decoder":
+            module_list.append("encoder_attn")
+        for ly in range(6):
+            for module in module_list:
+                _n = f"{ende}.layers.{ly}.{module}_{qkvo}_c"
+                if _n in score_dict:
+                    score, _args = score_dict[_n]
+                    _head_dim = score.shape[-1]
+                    cond = (score > thres)
+                    if torch.sum(cond) > 0:
+                        _inds = torch.where(cond)[0]
+                        count += _inds.shape[0]
+                        _inds_all = torch.cat([ _ind[cond] for _ind in _args])
+                        pruning_dict[_n] = _inds_all
+    # print("Count: ", count)
+    return pruning_dict     
+
+
+def get_attr(_model, _name):
+    _attrs = _name.split(".")
+    _parent = _model
+    for _attr in _attrs[:-1]:
+        _parent = getattr(_parent, _attr)
+    return getattr(_parent, _attrs[-1])
             
 ##############################################################
 

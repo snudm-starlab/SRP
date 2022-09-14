@@ -148,9 +148,14 @@ class SPTModelBase(FairseqEncoderDecoderModel):
         Copied from the base class, but without ``**kwargs``,
         which are not supported by TorchScript.
         """
+        _dev = self.encoder.embedding_c.data.device
+
+        enc_pos_emb_mask = self.pruning_manager.get_embedding_mask("encoder", _dev=_dev)
+        dec_pos_emb_mask = self.pruning_manager.get_embedding_mask("decoder", _dev=_dev)
+        
         encoder_out = self.encoder(
             src_tokens, src_lengths=src_lengths, return_all_hiddens=return_all_hiddens,
-            scoring=scoring,
+            scoring=scoring, pos_emb_mask=enc_pos_emb_mask,
         )
         decoder_out = self.decoder(
             prev_output_tokens,
@@ -160,7 +165,8 @@ class SPTModelBase(FairseqEncoderDecoderModel):
             alignment_heads=alignment_heads,
             src_lengths=src_lengths,
             return_all_hiddens=return_all_hiddens,
-            scoring=scoring
+            scoring=scoring,
+            pos_emb_mask=dec_pos_emb_mask,
         )
         return decoder_out
 
@@ -177,6 +183,8 @@ class SPTModelBase(FairseqEncoderDecoderModel):
         """Get normalized probabilities (or log probs) from a net's output."""
         return self.get_normalized_probs_scriptable(net_output, log_probs, sample)
 
+
+    '''
     @torch.no_grad()
     def pruning(self, gl_dict, eps=1e-8):
         en_heads = self.cfg.encoder.attention_heads
@@ -223,14 +231,14 @@ class SPTModelBase(FairseqEncoderDecoderModel):
                     else:
                         # q,k,v_proj
                         if 'weight' in wb:
-                            '''
+                            """
                             ############### For Test ##################
                             if torch.sum(_mask) == 0:
                                 print('\n\n+++++++++++++++++++++++++')
                                 print(_p.data[0:10, 0:10])
                                 print('++++++++++++++++++++++++++++')
                             ###########################################
-                            '''
+                            """
                             set_param(self, _n,
                                       nn.Parameter(_p.data[_mask, :]))
                         else:
@@ -279,6 +287,148 @@ class SPTModelBase(FairseqEncoderDecoderModel):
                             set_param(self, _n,
                                       nn.Parameter(_p.data))
                             continue
+    '''
+    @torch.no_grad()
+    def pruning(self,):
+        pm = self.pruning_manager
+        pd = pm.pruning_dict
+
+        en_heads = self.cfg.encoder.attention_heads
+        de_heads = self.cfg.decoder.attention_heads
+
+        def get_pruning_mask(max_len, pruning_indices):
+            _mask = torch.ones(max_len).bool()
+            _mask[pruning_indices] = False
+            return _mask
+
+        for _n, _p in self.named_parameters():
+            
+            if _n[-2:] == "_c" :
+                _indices = pd[_n] if _n in pd else []
+                mask = get_pruning_mask(_p.shape, _indices) # its name is its key
+                set_param(self, _n, nn.Parameter(_p.data[mask]))
+                continue  
+
+            elif 'alpha' in _n: 
+                ende = _n.split('.')[0]
+                _key = f"{ende}.embedding_c"
+                mask = get_pruning_mask(_p.shape[0], pd[_key])
+                set_param(self, _n, nn.Parameter(_p.data[mask]))
+
+            elif 'embed_tokens' in _n:
+                ende = _n.split('.')[0]
+                _key = f"{ende}.embedding_c"
+                mask = get_pruning_mask(_p.shape[1], pd[_key])
+                set_param(self, _n, nn.Parameter(_p.data[:, mask]))
+                if 'decoder.embed_tokens' in _n:
+                    self.decoder.output_projection.weight = self.decoder.embed_tokens.weight
+            elif 'output_projection' in _n:
+                continue
+ 
+            elif 'layer_norm' in _n:
+                ende, ly, type, wb = _parsing(_n)
+                if 'self' in type:
+                    _type = 'self_attn'
+                elif 'encoder' in type:
+                    _type = 'encoder_attn'
+                else:
+                    _type = 'fc'
+                _key = f"{ende}.layers.{ly}.{_type}_ln_c"
+                _indices = pd[_key] if _key in pd else []
+                mask = get_pruning_mask(_p.shape[0], _indices)
+                set_param(self, _n, nn.Parameter(_p.data[mask]))
+
+            elif 'fc' in _n:
+                # fc layers
+                # fc1: (gl_dim, fc_dim) | bias: fc_dim | global: prev_sub
+                # fc2: (fc_dim, gl_dim) | bias: fc_dim | global: prev_sub
+                ende, ly, type, wb = _parsing(_n)
+
+                # Get global and local masks
+                if ende == 'encoder':
+                    global_key = f'{ende}.layers.{ly}.self_attn_ln_c'
+                else:
+                    # decoder
+                    global_key = f'{ende}.layers.{ly}.encoder_attn_ln_c'
+                local_key = f'{ende}.layers.{ly}.fc_c'
+
+                global_indices = pd[global_key] if global_key in pd else []
+                local_indices = pd[local_key] if local_key in pd else []
+
+                if 'fc2' in _n:
+                    if 'bias' in _n:
+                        global_mask = get_pruning_mask(_p.shape[0],  global_indices)
+                        set_param(self, _n, nn.Parameter(_p.data[global_mask]))
+                    else:
+                        global_mask = get_pruning_mask(_p.shape[0],  global_indices)
+                        local_mask = get_pruning_mask(_p.shape[1],  local_indices)
+                        new_p = _p.data[global_mask, :][:, local_mask]
+                        set_param(self, _n, nn.Parameter(new_p.data))
+                else:
+                    if 'bias' in _n:
+                        local_mask = get_pruning_mask(_p.shape[0],  local_indices)
+                        set_param(self, _n, nn.Parameter(_p.data[local_mask]))
+                    else:
+                        global_mask = get_pruning_mask(_p.shape[1],  global_indices)
+                        local_mask = get_pruning_mask(_p.shape[0],  local_indices)
+                        new_p = _p.data[local_mask, :][:, global_mask]
+                        set_param(self, _n, nn.Parameter(new_p.data))
+            else:
+                # qkvo_proj
+                # q: (qk_dim, gl_dim) | bias: qk_dim | global: 
+                # k: (qk_dim, gl_dim) | bias: qk_dim | global: 
+                # v: (vo_dim, gl_dim) | bias: vo_dim | global: 
+                # o: (gl_dim, vo_dim) | bias: gl_dim | global: previous sub-layer ln_c
+                
+                ende, ly, type, wb = _parsing(_n)
+                # Get global and local masks
+                if 'self_attn' in _n:
+                    if ly == '0':
+                        global_key = f'{ende}.embedding_c'
+                    else:
+                        global_key = f'{ende}.layers.{int(ly)-1}.fc_ln_c'
+                    if 'q_proj' in _n or 'k_proj' in _n:
+                        local_key = f'{ende}.layers.{ly}.self_attn_qk_c'
+                    else:
+                        local_key = f'{ende}.layers.{ly}.self_attn_vo_c'
+                else:
+                    # encoder_attn
+                    global_key = f'{ende}.layers.{ly}.self_attn_ln_c'
+                    if 'q_proj' in _n or 'k_proj' in _n:
+                        local_key = f'{ende}.layers.{ly}.encoder_attn_qk_c'
+                    else:
+                        local_key = f'{ende}.layers.{ly}.encoder_attn_vo_c'
+
+                # q: (qk_dim, gl_dim) | bias: qk_dim | global: 
+                # k: (qk_dim, gl_dim) | bias: qk_dim | global: 
+                # v: (vo_dim, gl_dim) | bias: vo_dim | global: 
+                global_indices = pd[global_key] if global_key in pd else []
+                local_indices = pd[local_key] if local_key in pd else []
+
+                # Compute loss 
+                if 'out_proj' in _n:
+                    if 'bias' in _n:
+                        global_mask = get_pruning_mask(_p.shape[0],  global_indices)
+                        set_param(self, _n, nn.Parameter(_p.data[global_mask]))
+                    else:
+                        global_mask = get_pruning_mask(_p.shape[0],  global_indices)
+                        local_mask = get_pruning_mask(_p.shape[1],  local_indices)
+                        new_p = _p.data[global_mask, :][:, local_mask]
+                        set_param(self, _n, nn.Parameter(new_p.data))
+                else:
+                    if 'bias' in _n:
+                        local_mask = get_pruning_mask(_p.shape[0],  local_indices)
+                        set_param(self, _n, nn.Parameter(_p.data[local_mask]))
+                    else:
+                        global_mask = get_pruning_mask(_p.shape[1],  global_indices)
+                        local_mask = get_pruning_mask(_p.shape[0],  local_indices)
+                        new_p = _p.data[local_mask, :][:, global_mask]
+                        set_param(self, _n, nn.Parameter(new_p.data))
+        """
+        print("AFTER Pruning ___________________")
+        for _n, _p in self.named_parameters():
+            print("**", _n, _p.shape)
+        """
 
 def Embedding(num_embeddings, embedding_dim, padding_idx):
     m = nn.Embedding(num_embeddings, embedding_dim, padding_idx=padding_idx)

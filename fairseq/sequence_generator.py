@@ -781,7 +781,15 @@ class EnsembleModel(nn.Module):
     def forward_encoder(self, net_input: Dict[str, Tensor]):
         if not self.has_encoder():
             return None
-        return [model.encoder.forward_torchscript(net_input) for model in self.models]
+        def _forward_encoder(model, net_input):
+            if hasattr(model, "pruning_manager"):
+                _dev = model.encoder.embedding_c.data.device
+                pos_emb_mask = model.pruning_manager.get_embedding_mask("encoder", _dev=_dev)
+                return model.encoder.forward_torchscript(net_input, pos_emb_mask=pos_emb_mask)
+            else:
+                return model.encoder.forward_torchscript(net_input)
+
+        return [_forward_encoder(model, net_input) for model in self.models]
 
     @torch.jit.export
     def forward_decoder(
@@ -795,18 +803,39 @@ class EnsembleModel(nn.Module):
         avg_attn: Optional[Tensor] = None
         encoder_out: Optional[Dict[str, List[Tensor]]] = None
         for i, model in enumerate(self.models):
+            ############################## For SPT #########################################
+            if hasattr(model, "pruning_manager"):
+                _dev = model.encoder.embedding_c.data.device
+                pos_emb_mask = model.pruning_manager.get_embedding_mask("encoder", _dev=_dev)
+            else:
+                pos_emb_mask = None
+            #################################################################################
             if self.has_encoder():
                 encoder_out = encoder_outs[i]
             # decode each model
             if self.has_incremental_states():
-                decoder_out = model.decoder.forward(
-                    tokens,
-                    encoder_out=encoder_out,
-                    incremental_state=incremental_states[i],
-                )
+                if pos_emb_mask is not None:
+                    decoder_out = model.decoder.forward(
+                        tokens,
+                        encoder_out=encoder_out,
+                        incremental_state=incremental_states[i],
+                        pos_emb_mask=pos_emb_mask,
+                    )
+                else:
+                    decoder_out = model.decoder.forward(
+                        tokens,
+                        encoder_out=encoder_out,
+                        incremental_state=incremental_states[i],
+                    )
+
             else:
                 if hasattr(model, "decoder"):
-                    decoder_out = model.decoder.forward(tokens, encoder_out=encoder_out)
+                    if pos_emb_mask is not None:
+                        decoder_out = model.decoder.forward(tokens, encoder_out=encoder_out, 
+                                                            pos_emb_mask=pos_emb_mask)
+                    else:
+                        decoder_out = model.decoder.forward(tokens, encoder_out=encoder_out)
+
                 else:
                     decoder_out = model.forward(tokens)
 

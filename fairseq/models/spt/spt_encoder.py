@@ -59,6 +59,7 @@ class SPTEncoderBase(FairseqEncoder):
 
         embed_dim = embed_tokens.embedding_dim
         ################ For SPT ####################
+        self.alpha = nn.Parameter(torch.ones(embed_dim))
         self.embedding_c = nn.Parameter(torch.ones(embed_dim)
                                        , requires_grad=True)
         #############################################
@@ -124,14 +125,18 @@ class SPTEncoderBase(FairseqEncoder):
         return layer
 
     def forward_embedding(
-        self, src_tokens, token_embedding: Optional[torch.Tensor] = None
+        self, src_tokens, token_embedding: Optional[torch.Tensor] = None,
+        pos_emb_mask = None,
     ):
         # embed tokens and positions
         if token_embedding is None:
             token_embedding = self.embed_tokens(src_tokens)
         x = embed = self.embed_scale * token_embedding
         if self.embed_positions is not None:
-            x = embed + self.embed_positions(src_tokens)
+            if pos_emb_mask is not None:
+                x = embed + self.embed_positions(src_tokens)[:,:,pos_emb_mask]
+            else:
+                x = embed + self.embed_positions(src_tokens)
         if self.layernorm_embedding is not None:
             x = self.layernorm_embedding(x)
         x = self.dropout_module(x)
@@ -146,6 +151,7 @@ class SPTEncoderBase(FairseqEncoder):
         return_all_hiddens: bool = False,
         token_embeddings: Optional[torch.Tensor] = None,
         scoring: bool = False,
+        pos_emb_mask = None,
     ):
         """
         Args:
@@ -171,7 +177,8 @@ class SPTEncoderBase(FairseqEncoder):
                   Only populated if *return_all_hiddens* is True.
         """
         return self.forward_scriptable(
-            src_tokens, src_lengths, return_all_hiddens, token_embeddings, scoring
+            src_tokens, src_lengths, return_all_hiddens, 
+            token_embeddings, scoring, pos_emb_mask
         )
 
     # TorchScript doesn't support super() method so that the scriptable Subclass
@@ -185,6 +192,7 @@ class SPTEncoderBase(FairseqEncoder):
         return_all_hiddens: bool = False,
         token_embeddings: Optional[torch.Tensor] = None,
         scoring: bool = False,
+        pos_emb_mask = None,
     ):
         """
         Args:
@@ -213,7 +221,9 @@ class SPTEncoderBase(FairseqEncoder):
         encoder_padding_mask = src_tokens.eq(self.padding_idx)
         has_pads = src_tokens.device.type == "xla" or encoder_padding_mask.any()
 
-        x, encoder_embedding = self.forward_embedding(src_tokens, token_embeddings)
+        x, encoder_embedding = self.forward_embedding(src_tokens, token_embeddings, 
+                                pos_emb_mask = pos_emb_mask)
+        x *= self.alpha
 
         ############## For SPT #######################
         if scoring:
@@ -232,7 +242,6 @@ class SPTEncoderBase(FairseqEncoder):
 
         if return_all_hiddens:
             encoder_states.append(x)
-
         # encoder layers
         for layer in self.layers:
             lr = layer(

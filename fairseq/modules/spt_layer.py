@@ -75,24 +75,29 @@ class SPTEncoderLayerBase(nn.Module):
 
         #### Connection parameters
         # These parameters are only used in 
-        c_init = self.cfg.c_init
+        if hasattr(self.cfg, "c_init"):
+            c_init = self.cfg.c_init
+        else:
+            c_init = 1.
+        
         self.self_attn_qk_c = torch.nn.Parameter(torch.ones(self.embed_dim) * c_init)
         self.self_attn_vo_c = torch.nn.Parameter(torch.ones(self.embed_dim) * c_init)
         self.self_attn_ln_c = torch.nn.Parameter(torch.ones(self.embed_dim) * c_init)
 
         self.fc_c = torch.nn.Parameter(torch.ones(cfg.encoder.ffn_embed_dim) * c_init)
         self.fc_ln_c = torch.nn.Parameter(torch.ones(self.embed_dim) * c_init)
+        
         # Connection parameters
 
     def reset_c(self,):
         _dev = self.fc1.weight.device
         c_init = self.cfg.c_init
-        self.self_attn_qk_c.data = torch.ones(self.embed_dim).to(_dev) * c_init
-        self.self_attn_vo_c.data = torch.ones(self.embed_dim).to(_dev) * c_init
-        self.self_attn_ln_c.data = torch.ones(self.embed_dim).to(_dev) * c_init
+        self.self_attn_qk_c.data.fill_(c_init) #  = torch.ones_like(self.self_attn_qk_c).to(_dev) * c_init
+        self.self_attn_vo_c.data.fill_(c_init) # = torch.ones_like(self.self_attn_vo_c).to(_dev) * c_init
+        self.self_attn_ln_c.data.fill_(c_init) # = torch.ones_like(self.self_attn_ln_c).to(_dev) * c_init
 
-        self.fc_c.data = torch.ones(self.cfg.encoder.ffn_embed_dim).to(_dev) * c_init
-        self.fc_ln_c.data = torch.ones(self.embed_dim).to(_dev) * c_init
+        self.fc_c.data.fill_(c_init) # = torch.ones_like(self.fc_c.data).to(_dev) * c_init
+        self.fc_ln_c.data.fill_(c_init) #  = torch.ones_like(self).to(_dev) * c_init
 
         
 
@@ -401,7 +406,12 @@ class SPTDecoderLayerBase(nn.Module):
         self.onnx_trace = False
 
         # These parameters are only used in 
-        c_init = cfg.c_init
+        # c_init = cfg.c_init
+        if hasattr(self.cfg, "c_init"):
+            c_init = self.cfg.c_init
+        else:
+            c_init = 1.
+        
         self.self_attn_qk_c = torch.nn.Parameter(torch.ones(self.embed_dim) * c_init)
         self.self_attn_vo_c = torch.nn.Parameter(torch.ones(self.embed_dim) * c_init)
         self.self_attn_ln_c = torch.nn.Parameter(torch.ones(self.embed_dim) * c_init)
@@ -412,6 +422,7 @@ class SPTDecoderLayerBase(nn.Module):
 
         self.fc_c = torch.nn.Parameter(torch.ones(cfg.encoder.ffn_embed_dim) * c_init)
         self.fc_ln_c = torch.nn.Parameter(torch.ones(self.embed_dim) * c_init)
+        
         # Connection parameters
 
     def build_fc1(self, input_dim, output_dim, q_noise, qn_block_size):
@@ -449,16 +460,16 @@ class SPTDecoderLayerBase(nn.Module):
     def reset_c(self, ):
         _dev = self.fc1.weight.device
         c_init = self.cfg.c_init
-        self.self_attn_qk_c.data = torch.ones(self.embed_dim).to(_dev) * c_init
-        self.self_attn_vo_c.data = torch.ones(self.embed_dim).to(_dev) * c_init
-        self.self_attn_ln_c.data = torch.ones(self.embed_dim).to(_dev) * c_init
+        self.self_attn_qk_c.data.fill_(c_init) # = torch.ones(self.embed_dim).to(_dev) * c_init
+        self.self_attn_vo_c.data.fill_(c_init) #  = torch.ones(self.embed_dim).to(_dev) * c_init
+        self.self_attn_ln_c.data.fill_(c_init) #  = torch.ones(self.embed_dim).to(_dev) * c_init
 
-        self.encoder_attn_qk_c.data = torch.ones(self.embed_dim).to(_dev) * c_init
-        self.encoder_attn_vo_c.data = torch.ones(self.embed_dim).to(_dev) * c_init
-        self.encoder_attn_ln_c.data = torch.ones(self.embed_dim).to(_dev) * c_init
+        self.encoder_attn_qk_c.data.fill_(c_init) #  = torch.ones(self.embed_dim).to(_dev) * c_init
+        self.encoder_attn_vo_c.data.fill_(c_init) #  = torch.ones(self.embed_dim).to(_dev) * c_init
+        self.encoder_attn_ln_c.data.fill_(c_init) #  = torch.ones(self.embed_dim).to(_dev) * c_init
 
-        self.fc_c.data = torch.ones(self.cfg.encoder.ffn_embed_dim).to(_dev) * c_init
-        self.fc_ln_c.data = torch.ones(self.embed_dim).to(_dev) * c_init
+        self.fc_c.data.fill_(c_init) #  = torch.ones(self.cfg.encoder.ffn_embed_dim).to(_dev) * c_init
+        self.fc_ln_c.data.fill_(c_init) #  = torch.ones(self.embed_dim).to(_dev) * c_init
 
     def prepare_for_onnx_export_(self):
         self.onnx_trace = True
