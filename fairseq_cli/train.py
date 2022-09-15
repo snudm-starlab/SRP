@@ -206,10 +206,13 @@ def main(cfg: FairseqConfig) -> None:
     ########3############### For STP #######################
     class PruningManager():
         def __init__(self, cfg): 
-            self.P = 1 - np.sqrt(cfg.common.compression_rate)
+            # self.P = 1 - np.sqrt(cfg.common.compression_rate)
+            self.P = self.get_pruning_rate(self.get_pruning_rate(cfg.common.compression_rate))
             self.n = cfg.common.pruning_iter
             self.p = 1 - (1-self.P) ** (1/cfg.common.pruning_iter)
             
+            self.src_words = 6632
+            self.tar_words = 8848
             self.GLE = 512
             self.GLD = 512
             self.FC = 1024 * 12
@@ -225,6 +228,17 @@ def main(cfg: FairseqConfig) -> None:
 
             self.encoder_indices = torch.arange(self.encoder_orig_dim)
             self.decoder_indices = torch.arange(self.decoder_orig_dim)
+
+        def get_pruning_rate(self, compression_rate):
+            assert slef.GLE == self.GLD # For simplify computation of n1
+            n1 = float(self.GLE * (self.FC * 2 + self.QK * 4 * 2 + self.VO * 4 * 2))
+            n2 = float(self.src_words * self.GLE + self.tar_words * self.GLD)
+            
+            A = (n2 / n1)
+            B = -1 * compression_rate * (n1 + n2) / n1
+            
+            p = (-1 * A + np.sqrt(A ** 2 - 4 * B) ) / 2
+            return p 
 
 
         def get(self, ):
