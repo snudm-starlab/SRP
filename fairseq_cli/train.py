@@ -203,7 +203,7 @@ def main(cfg: FairseqConfig) -> None:
     train_meter = meters.StopwatchMeter()
     train_meter.start()
     
-    ########3############### For STP #######################
+    ######################## For STP #######################
     class PruningManager():
         def __init__(self, cfg): 
             self.src_words = 6632
@@ -298,7 +298,7 @@ def main(cfg: FairseqConfig) -> None:
             setattr(trainer.model, 'phase', 'pruning')
             setattr(pm, '_count', 0)
             phase = getattr(trainer.model, 'phase')
-            print(f"\n**** {epoch_itr.epoch}/{cfg.common.warming_up} | change phase 'warming-up' to 'pruning'\n")
+            print(f"\n**** {epoch_itr.epoch+1}/{cfg.common.warming_up} | change phase 'warming-up' to 'pruning'\n")
         
 
         if lr <= cfg.optimization.stop_min_lr:
@@ -318,7 +318,7 @@ def main(cfg: FairseqConfig) -> None:
             # Get Group sum
             # _eps = cfg.common.prune_eps
             # local_gl_dic --> k:v = local_key: [local_gl, local_count]
-            pm._count += 1
+            pm._count += 1 # regularization without pruning
             if pm._count % cfg.common.pruning_period == 0:
                 print(f"\n**** {epoch_itr.epoch} | Perform pruning #{pruning_count}'\n")
                 trainer.model.pruning()

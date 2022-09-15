@@ -301,9 +301,9 @@ class LossManager:
         else:
             self.count += param.numel()
 
-        if reg_type == 'l1':
+        if self.reg_type == 'l1':
             return torch.sum(torch.abs(param))
-        elif reg_type == 'l2':
+        elif self.reg_type == 'l2':
             return torch.sum(param * param)
         else:
             return None
