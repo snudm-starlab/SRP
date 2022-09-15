@@ -49,7 +49,7 @@ class SPTConfig(FairseqDataclass):
         metadata={"help": "coefficient for global group lasso regularization"},
     )
 
-    l2: float = field(
+    reg: float = field(
         default=10,
         metadata={"help": "coefficient for l2 regularization"},
     )
@@ -76,6 +76,7 @@ def label_smoothed_nll_loss(lprobs, target, epsilon, ignore_index=None, reduce=T
 
 
 # For SPT
+'''
 def get_group_sum(model):
     gl_dict = {} # _key: [_gl, _count]
     en_heads = model.cfg.encoder.attention_heads
@@ -274,6 +275,7 @@ def group_lasso_loss(model):
     # print("Local: ",local_gl_loss, "Global: ", global_gl_loss)
     # time.sleep(10000)
     return local_qk_gl_loss, local_vo_gl_loss, local_fc_gl_loss, global_gl_loss
+'''
 
 def _parsing(_name):
     assert 'embed_tokens' not in _name
@@ -287,6 +289,15 @@ def _parsing(_name):
             print("* Name: ", _name)
     return ende, ly, type, wb
 
+
+def reg_loss(param, reg_type='l1'):
+    if reg_type == 'l1':
+        return torch.sum(torch.abs(param))
+    elif reg_type == 'l2':
+        return torch.sum(param * param)
+    else:
+        return None
+
 def update_loss(loss, new_loss):
     if loss is None:
         loss = new_loss
@@ -295,14 +306,13 @@ def update_loss(loss, new_loss):
     return loss
 
 
-def get_l2_loss(model):
+def get_reg_loss(model, reg_type='l1'):
     pm = model.pruning_manager
     pd = pm.pruning_dict
 
     en_heads = model.cfg.encoder.attention_heads
     de_heads = model.cfg.decoder.attention_heads
-    l2_loss = None
-
+    _loss = None
     for _n, _p in model.named_parameters():
         
         if _n[-2:] == "_c" or 'embed_tokens' in _n:
@@ -312,8 +322,8 @@ def get_l2_loss(model):
             ende = _n.split('.')[0]
             _key = f"{ende}.embedding_c"
             mask = pd[_key]
-            new_loss = torch.sum( _p[mask] * _p[mask])
-            l2_loss = update_loss(l2_loss, new_loss)
+            new_loss = reg_loss(_p[mask], reg_type=reg_type) # torch.sum( _p[mask] * _p[mask])
+            _loss = update_loss(_loss, new_loss)
 
         
         elif 'layer_norm' in _n:
@@ -326,8 +336,8 @@ def get_l2_loss(model):
                 _type = 'fc'
             _key = f"{ende}.layers.{ly}.{_type}_ln_c"
             mask = pd[_key] if _key in pd else []
-            new_loss = torch.sum(_p[mask] * _p[mask])
-            l2_loss = update_loss(l2_loss, new_loss)
+            new_loss = reg_loss(_p[mask], reg_type=reg_type) # torch.sum(_p[mask] * _p[mask])
+            _loss = update_loss(_loss, new_loss)
         elif 'fc' in _n:
             # fc layers
             # fc1: (gl_dim, fc_dim) | bias: fc_dim | global: prev_sub
@@ -348,25 +358,33 @@ def get_l2_loss(model):
 
             if 'fc2' in _n:
                 if 'bias' in _n:
-                    new_loss = torch.sum(_p[global_mask] * _p[global_mask])
+                    new_loss = reg_loss(_p[global_mask], reg_type=reg_type)  
+                    # torch.sum(_p[global_mask] * _p[global_mask])
                 else:
-                    loss_1 = torch.sum(_p[global_mask,:] ** 2)
-                    loss_2 = torch.sum(_p[:,local_mask] ** 2)
-                    loss_3 = torch.sum(_p[global_mask,:][:,local_mask] ** 2)
+                    loss_1 = reg_loss(_p[global_mask, :], reg_type=reg_type)
+                    # torch.sum(_p[global_mask,:] ** 2)
+                    loss_2 = reg_loss(_p[:, local_mask], reg_type=reg_type)
+                    # torch.sum(_p[:,local_mask] ** 2)
+                    loss_3 = reg_loss(_p[global_mask, :][:, local_mask], reg_type=reg_type)
+                    # torch.sum(_p[global_mask,:][:,local_mask] ** 2)
                     new_loss = loss_1 + loss_2 - loss_3 
             else:
                 if 'bias' in _n:
-                    new_loss = torch.sum(_p[local_mask] * _p[local_mask])
+                    new_loss = reg_loss(_p[local_mask], reg_type=reg_type)
+                    # torch.sum(_p[local_mask] * _p[local_mask])
                 else:
                     # print(f"* {_n}: {_p.shape} | {local_mask} {local_mask.shape}")
                     # print(_n)
                     # print(_p.shape)
                     # print(local_mask)
-                    loss_1 = torch.sum(_p[:,global_mask] ** 2)
-                    loss_2 = torch.sum(_p[local_mask,:] ** 2)
-                    loss_3 = torch.sum(_p[local_mask,:][:,global_mask] ** 2)
+                    loss_1 = reg_loss(_p[:, global_mask], reg_type=reg_type)
+                    # torch.sum(_p[:,global_mask] ** 2)
+                    loss_2 = reg_loss(_p[local_mask, :], reg_type=reg_type)
+                    # torch.sum(_p[local_mask,:] ** 2)
+                    loss_3 = reg_loss(_p[local_mask,:][:,global_mask], reg_type=reg_type)
+                    # torch.sum(_p[local_mask,:][:,global_mask] ** 2)
                     new_loss = loss_1 + loss_2 - loss_3
-            l2_loss = update_loss(l2_loss, new_loss)
+            _loss = update_loss(_loss, new_loss)
             # print(" ******* ", _n, " Ends")
 
         else:
@@ -412,24 +430,32 @@ def get_l2_loss(model):
             # Compute loss 
             if 'out_proj' in _n:
                 if 'bias' in _n:
-                    new_loss = torch.sum(_p[global_mask] * _p[global_mask])
+                    new_loss = reg_loss(_p[global_mask], reg_type=reg_type)
+                    #  torch.sum(_p[global_mask] * _p[global_mask])
                 else:
-                    loss_1 = torch.sum(_p[global_mask,:] ** 2)
-                    loss_2 = torch.sum(_p[:,local_mask] ** 2)
-                    loss_3 = torch.sum(_p[global_mask,:][:,local_mask] ** 2)
+                    loss_1 = reg_loss(_p[global_mask, :], reg_type=reg_type)
+                    # torch.sum(_p[global_mask,:] ** 2)
+                    loss_2 = reg_loss(_p[:, local_mask], reg_type=reg_type)
+                    # torch.sum(_p[:,local_mask] ** 2)
+                    loss_3 = reg_loss(_p[global_mask, :][:, local_mask], reg_type=reg_type)
+                    # torch.sum(_p[global_mask,:][:,local_mask] ** 2)
                     new_loss = loss_1 + loss_2 - loss_3 
                     # new_loss = loss_1 + loss_2
             else:
                 if 'bias' in _n:
-                    new_loss = torch.sum(_p[local_mask] * _p[local_mask])
+                    new_loss = reg_loss(_p[local_mask], reg_type=reg_type)
+                    # torch.sum(_p[local_mask] * _p[local_mask])
                 else:
-                    loss_1 = torch.sum(_p[:,global_mask] ** 2)
-                    loss_2 = torch.sum(_p[local_mask,:] ** 2)
-                    loss_3 = torch.sum(_p[local_mask,:][:,global_mask] ** 2)
+                    loss_1 = reg_loss(_p[:, global_mask], reg_type=reg_type)
+                    # torch.sum(_p[:,global_mask] ** 2)
+                    loss_2 = reg_loss(_p[local_mask, :], reg_type=reg_type)
+                    # torch.sum(_p[local_mask,:] ** 2)
+                    loss_3 = reg_loss(_p[local_mask,:][:,global_mask], reg_type=reg_type)
+                    # torch.sum(_p[local_mask,:][:,global_mask] ** 2)
                     new_loss = loss_1 + loss_2 - loss_3
                     # new_loss = loss_1 + loss_2
-            l2_loss = update_loss(l2_loss, new_loss)
-    return l2_loss
+            _loss = update_loss(_loss, new_loss)
+    return _loss
 
 
 
@@ -499,7 +525,7 @@ class SPTCriterion(FairseqCriterion):
         )
         phase = getattr(model, 'phase', 'x')
         if phase == 'pruning' and not scoring:
-            loss += model.cfg.l2 * get_l2_loss(model)
+            loss += model.cfg.reg * get_reg_loss(model, reg_type='l1')
             
             '''
             local_qk_gl_loss, local_vo_gl_loss, local_fc_gl_loss, global_gl_loss = group_lasso_loss(model)
