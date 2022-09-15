@@ -39,7 +39,7 @@ from fairseq.file_io import PathManager
 from fairseq.logging import meters, metrics, progress_bar
 from fairseq.model_parallel.megatron_trainer import MegatronTrainer
 from fairseq.trainer import Trainer
-from fairseq.criterions.spt import get_group_sum, group_report
+# from fairseq.criterions.spt import get_group_sum, group_report
 
 
 def main(cfg: FairseqConfig) -> None:
@@ -207,8 +207,8 @@ def main(cfg: FairseqConfig) -> None:
     class PruningManager():
         def __init__(self, cfg): 
             self.P = 1 - np.sqrt(cfg.common.compression_rate)
-            self.n = cfg.common.pruning_epochs
-            self.p = 1 - (1-self.P) ** (1/cfg.common.pruning_epochs)
+            self.n = cfg.common.pruning_iter
+            self.p = 1 - (1-self.P) ** (1/cfg.common.pruning_iter)
             
             self.GLE = 512
             self.GLD = 512
@@ -272,15 +272,18 @@ def main(cfg: FairseqConfig) -> None:
     setattr(trainer.model, "pruning_manager", pm)
     setattr(trainer.model, 'phase', 'warming-up')
 
-
+    pruning_count = 0
     # phase: 'pruning' or 'fine-tuning'
     #########################################################
 
     while epoch_itr.next_epoch_idx <= max_epoch:
         phase = getattr(trainer.model, 'phase')
-        if (phase == 'warming-up') and (epoch_itr.epoch > cfg.common.warming_up):
+        if (phase == 'warming-up') and (epoch_itr.epoch >= cfg.common.warming_up):
             setattr(trainer.model, 'phase', 'pruning')
+            setattr(pm, '_count', 0)
             phase = getattr(trainer.model, 'phase')
+            print(f"\n**** {epoch_itr.epoch}/{cfg.common.warming_up} | change phase 'warming-up' to 'pruning'\n")
+        
 
         if lr <= cfg.optimization.stop_min_lr:
             logger.info(
@@ -299,15 +302,20 @@ def main(cfg: FairseqConfig) -> None:
             # Get Group sum
             # _eps = cfg.common.prune_eps
             # local_gl_dic --> k:v = local_key: [local_gl, local_count]
-            trainer.model.pruning()
-            trainer.optimizer._optimizer.pruning(trainer.model)
-            pm.update_embedding_mask(
-                pm.pruning_dict['encoder.embedding_c'], 'encoder')
-            pm.update_embedding_mask(
-                pm.pruning_dict['decoder.embedding_c'], 'decoder')
-            # print(f"# params: {_params}")
-            if epoch_itr.epoch > (cfg.common.warming_up + cfg.common.pruning_epochs):
-                setattr(trainer.model, 'phase', 'fine-tuning')
+            pm._count += 1
+            if pm._count % cfg.common.pruning_period == 0:
+                print(f"\n**** {epoch_itr.epoch} | Perform pruning #{pruning_count}'\n")
+                trainer.model.pruning()
+                trainer.optimizer._optimizer.pruning(trainer.model)
+                pm.update_embedding_mask(
+                    pm.pruning_dict['encoder.embedding_c'], 'encoder')
+                pm.update_embedding_mask(
+                    pm.pruning_dict['decoder.embedding_c'], 'decoder')
+                pruning_count += 1
+                # print(f"# params: {_params}")
+                if pruning_count == cfg.common.pruning_iter:
+                    setattr(trainer.model, 'phase', 'fine-tuning')
+                pm._count = 0
 
         # Check pruning target
         _params = np.sum([_p.numel() for _p in trainer.model.parameters()])
@@ -390,6 +398,7 @@ def train(
 ) -> Tuple[List[Optional[float]], bool]:
     """Train the model for one epoch and return validation losses."""
     # Initialize data iterator
+    # epoch_itr.epoch increased
     itr = epoch_itr.next_epoch_itr(
         fix_batches_to_gpus=cfg.distributed_training.fix_batches_to_gpus,
         shuffle=(epoch_itr.next_epoch_idx > cfg.dataset.curriculum),
@@ -404,8 +413,9 @@ def train(
         update_freq,
         skip_remainder_batch=cfg.optimization.skip_remainder_batch,
     )
-    if cfg.common.tpu:
-        itr = utils.tpu_data_loader(itr)
+    
+    # if cfg.common.tpu:
+    #     itr = utils.tpu_data_loader(itr)
     progress = progress_bar.progress_bar(
         itr,
         log_format=cfg.common.log_format,
@@ -443,6 +453,7 @@ def train(
             else False
         ),
     )
+    
     progress.update_config(_flatten_config(cfg))
 
     trainer.begin_epoch(epoch_itr.epoch)
@@ -463,7 +474,7 @@ def train(
         ):
             log_output = trainer.train_step(samples, scoring=scoring)
 
-        if scoring:
+        if scoring and getattr(pruning_manager, '_count', None) == 0:
             # Scoring groups at the beginning of every epoch
             gle, gld, fc, qk, vo = pruning_manager.get()
             print("#######################################")
