@@ -251,6 +251,7 @@ class CommonConfig(FairseqDataclass):
         },
     )
     ################################ For SPT ####################################
+    """
     prune_eps: float = field(
         default=1e-8,
         metadata={
@@ -264,6 +265,7 @@ class CommonConfig(FairseqDataclass):
             "help": "Target compression rate. Stop pruning if spt meets this"
         },
     )
+    """
 
     compression_rate: float = field(
         default=0.2,
@@ -272,8 +274,15 @@ class CommonConfig(FairseqDataclass):
         },
     )
 
-    pruning_epochs: int = field(
-        default=40,
+    pruning_iter: int = field(
+        default=4,
+        metadata={
+            "help": "number of epochs for pruning after warming-up epochs"
+        },
+    )
+    
+    pruning_period: int = field(
+        default=15,
         metadata={
             "help": "number of epochs for pruning after warming-up epochs"
         },
