@@ -483,13 +483,14 @@ class SPTCriterion(FairseqCriterion):
         3) logging outputs to display while training
         """
         net_output = model(**sample["net_input"], scoring=scoring)
-        loss, nll_loss = self.compute_loss(model, net_output, sample, reduce=reduce, scoring=scoring)
+        loss, nll_loss, reg_loss = self.compute_loss(model, net_output, sample, reduce=reduce, scoring=scoring)
         sample_size = (
             sample["target"].size(0) if self.sentence_avg else sample["ntokens"]
         )
         logging_output = {
             "loss": loss.data,
             "nll_loss": nll_loss.data,
+            "reg_loss": reg_loss.data,
             "ntokens": sample["ntokens"],
             "nsentences": sample["target"].size(0),
             "sample_size": sample_size,
@@ -520,26 +521,11 @@ class SPTCriterion(FairseqCriterion):
         )
         phase = getattr(model, 'phase', 'x')
         if phase == 'pruning' and not scoring:
-            loss += model.cfg.reg * get_reg_loss(model, reg_type='l1')
-            
-            '''
-            local_qk_gl_loss, local_vo_gl_loss, local_fc_gl_loss, global_gl_loss = group_lasso_loss(model)
-
-            loss += model.cfg.local_qk_gl * local_qk_gl_loss + \
-                    model.cfg.local_vo_gl * local_vo_gl_loss + \
-                    model.cfg.local_fc_gl * local_fc_gl_loss + \
-                    model.cfg.global_gl * global_gl_loss
-            '''
-            
-        """
-        return local_attn_gl_loss, local_fc_gl_loss, global_gl_loss
-        print(f"loss: {loss} | "
-              f"nll_loss: {nll_loss} | local_gl_loss: {local_gl_loss*model.cfg.local_gl}"
-              f" | global_gl_loss: {global_gl_loss * model.cfg.global_gl}")
-        """
-        # time.sleep(1000)
-
-        return loss, nll_loss
+            reg_loss = model.cfg.reg * get_reg_loss(model, reg_type='l1')
+            loss += reg_loss
+        else:
+            reg_loss = torch.zeros_like(loss)
+        return loss, nll_loss, reg_loss
 
     def compute_accuracy(self, model, net_output, sample):
         lprobs, target = self.get_lprobs_and_target(model, net_output, sample)
@@ -555,6 +541,7 @@ class SPTCriterion(FairseqCriterion):
         """Aggregate logging outputs from data parallel training."""
         loss_sum = sum(log.get("loss", 0) for log in logging_outputs)
         nll_loss_sum = sum(log.get("nll_loss", 0) for log in logging_outputs)
+        reg_loss_sum = sum(log.get("reg_loss", 0) for log in logging_outputs)
         ntokens = sum(log.get("ntokens", 0) for log in logging_outputs)
         sample_size = sum(log.get("sample_size", 0) for log in logging_outputs)
 
@@ -563,6 +550,9 @@ class SPTCriterion(FairseqCriterion):
         )
         metrics.log_scalar(
             "nll_loss", nll_loss_sum / ntokens / math.log(2), ntokens, round=3
+        )
+        metrics.log_scalar(
+            "reg_loss", reg_loss_sum / ntokens / math.log(2), ntokens, round=3
         )
         metrics.log_derived(
             "ppl", lambda meters: utils.get_perplexity(meters["nll_loss"].avg)

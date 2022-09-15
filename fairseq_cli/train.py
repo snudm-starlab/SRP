@@ -219,10 +219,9 @@ def main(cfg: FairseqConfig) -> None:
 
             # Compute pruing ratio
             # self.P = 1 - np.sqrt(cfg.common.compression_rate)
-            self.P = self.get_pruning_rate(self.get_pruning_rate(cfg.common.compression_rate))
+            self.P = 1-self.get_pruning_rate(cfg.common.compression_rate)
             self.n = cfg.common.pruning_iter
-            self.p = 1 - (1-self.P) ** (1/cfg.common.pruning_iter)
-            
+            self.p = 1 - (1-self.P) ** (1/self.n) 
 
             # For positional embedding
             self.encoder_orig_dim = 512
@@ -233,6 +232,7 @@ def main(cfg: FairseqConfig) -> None:
 
         def get_pruning_rate(self, compression_rate):
             assert self.GLE == self.GLD # For simplify computation of n1
+            
             n1 = float(self.GLE * (self.FC * 2 + self.QK * 4 * 2 + self.VO * 4 * 2))
             n2 = float(self.src_words * self.GLE + self.tar_words * self.GLD)
             
@@ -339,6 +339,9 @@ def main(cfg: FairseqConfig) -> None:
         # print pruning status
         
         _res = f'{phase[0]},{epoch_itr.epoch},'
+        num_groups = trainer.model.get_num_groups()
+        num_grups = [str(_num) for _num in num_groups]
+        _res+= ','.join(num_groups) + ','
         # _group_res = group_report(trainer.model, gl_dict)
         # _res += _group_res
         _res += f'{_params},{valid_losses[0]}'
