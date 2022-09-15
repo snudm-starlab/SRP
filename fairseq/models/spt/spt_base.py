@@ -429,6 +429,24 @@ class SPTModelBase(FairseqEncoderDecoderModel):
         for _n, _p in self.named_parameters():
             print("**", _n, _p.shape)
         """
+    def get_num_groups(self,):
+        param_dict = self.state_dict()
+        num_groups = []
+        for ende in ['encoder', 'decoder']:
+            # Embeddings
+            num_groups.append(param_dict[f'{ende}.embedding_c'].shape[0])
+            for ly in range(0,6):
+                # self_attn
+                num_groups.append(param_dict[f'{ende}.layers.{ly}.self_attn_qk_c'].shape[0])
+                num_groups.append(param_dict[f'{ende}.layers.{ly}.self_attn_vo_c'].shape[0])
+
+                if ende == 'decoder':
+                    # encoder-attn
+                    num_groups.append(param_dict[f'{ende}.layers.{ly}.encoder_attn_qk_c'].shape[0])
+                    num_groups.append(param_dict[f'{ende}.layers.{ly}.encoder_attn_vo_c'].shape[0]) 
+                num_groups.append(param_dict[f'{ende}.layers.{ly}.fc_c'].shape[0])
+        return num_groups
+        
 
 def Embedding(num_embeddings, embedding_dim, padding_idx):
     m = nn.Embedding(num_embeddings, embedding_dim, padding_idx=padding_idx)
