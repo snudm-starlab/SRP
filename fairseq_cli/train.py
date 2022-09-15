@@ -340,7 +340,7 @@ def main(cfg: FairseqConfig) -> None:
         
         _res = f'{phase[0]},{epoch_itr.epoch},'
         num_groups = trainer.model.get_num_groups()
-        num_grups = [str(_num) for _num in num_groups]
+        num_groups = [str(_num) for _num in num_groups]
         _res+= ','.join(num_groups) + ','
         # _group_res = group_report(trainer.model, gl_dict)
         # _res += _group_res
