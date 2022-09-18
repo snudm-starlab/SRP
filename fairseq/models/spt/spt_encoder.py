@@ -59,7 +59,8 @@ class SPTEncoderBase(FairseqEncoder):
 
         embed_dim = embed_tokens.embedding_dim
         ################ For SPT ####################
-        self.alpha = nn.Parameter(torch.ones(embed_dim))
+        self.alpha_init = 1.
+        self.alpha = nn.Parameter(torch.ones(embed_dim) * self.alpha_init)
         self.embedding_c = nn.Parameter(torch.ones(embed_dim)
                                        , requires_grad=True)
         #############################################
@@ -223,7 +224,7 @@ class SPTEncoderBase(FairseqEncoder):
 
         x, encoder_embedding = self.forward_embedding(src_tokens, token_embeddings, 
                                 pos_emb_mask = pos_emb_mask)
-        x *= self.alpha
+        x *= (self.alpha / self.alpha_init)
 
         ############## For SPT #######################
         if scoring:

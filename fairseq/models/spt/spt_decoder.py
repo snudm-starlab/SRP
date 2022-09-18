@@ -72,7 +72,8 @@ class SPTDecoderBase(FairseqIncrementalDecoder):
         embed_dim = cfg.decoder.embed_dim
 
         #################### For SPT ######################
-        self.alpha = nn.Parameter(torch.ones(embed_dim))
+        self.alpha_init = 1.
+        self.alpha = nn.Parameter(torch.ones(embed_dim) * self.alpha_init)
         self.embedding_c = nn.Parameter(torch.ones(embed_dim),
                                      requires_grad=True)
         ###################################################
@@ -340,7 +341,7 @@ class SPTDecoderBase(FairseqIncrementalDecoder):
         if self.layernorm_embedding is not None:
             x = self.layernorm_embedding(x)
 
-        x *= self.alpha
+        x *= (self.alpha / self.alpha_init)
 
         x = self.dropout_module(x)
 

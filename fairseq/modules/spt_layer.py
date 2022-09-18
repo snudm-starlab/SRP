@@ -199,7 +199,7 @@ class SPTEncoderLayerBase(nn.Module):
         x,
         encoder_padding_mask: Optional[Tensor],
         attn_mask: Optional[Tensor] = None,
-        scoring=False,
+        scoring = False,
     ):
         """
         Args:

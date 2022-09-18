@@ -295,7 +295,15 @@ class LossManager:
         self.loss = None
         self.count = 0
 
+        # For test
+        self.param = None
+
     def compute_loss(self, param, discount=False):
+        ######### For Test#######
+        if self.param == None:
+            self.param = param
+        #########################
+
         if discount:
             self.count -= param.numel()
         else:
@@ -315,7 +323,7 @@ class LossManager:
             self.loss += new_loss
 
     def get_loss(self, ):
-        return self.loss / self.count 
+        return self.loss # / self.count 
 
 
 def get_reg_loss(model, reg_type='l1'):
@@ -325,10 +333,16 @@ def get_reg_loss(model, reg_type='l1'):
     en_heads = model.cfg.encoder.attention_heads
     de_heads = model.cfg.decoder.attention_heads
     
-    lm = LossManager(reg_type='l1')  
+    lm = LossManager(reg_type=reg_type)  
 
     _loss = None
-    _count = 0
+    
+    # For test
+    alpha_sum = torch.tensor(0.).to('cuda:0')
+    alpha_count = 0
+    non_alpha_sum = torch.tensor(0.).to('cuda:0')
+    non_alpha_count = 0
+    
     for _n, _p in model.named_parameters():
         
         if _n[-2:] == "_c" or 'embed_tokens' in _n:
@@ -341,7 +355,9 @@ def get_reg_loss(model, reg_type='l1'):
             new_loss = lm.compute_loss(_p[mask])
             lm.update_loss(new_loss)
 
-        
+            alpha_sum += new_loss
+            alpha_count += _p[mask].numel()
+
         elif 'layer_norm' in _n:
             ende, ly, type, wb = _parsing(_n)
             if 'self' in type:
@@ -354,6 +370,10 @@ def get_reg_loss(model, reg_type='l1'):
             mask = pd[_key] if _key in pd else []
             new_loss = lm.compute_loss(_p[mask])
             lm.update_loss(new_loss)
+            
+            if 'weight' in _n:
+                alpha_sum += new_loss
+                alpha_count += _p[mask].numel()
 
         elif 'fc' in _n:
             # fc layers
@@ -376,7 +396,6 @@ def get_reg_loss(model, reg_type='l1'):
             if 'fc2' in _n:
                 if 'bias' in _n:
                     new_loss = lm.compute_loss(_p[global_mask])
-                    lm.update_loss(new_loss)
                 else:
                     loss_1 = lm.compute_loss(_p[global_mask, :])
                     loss_2 = lm.compute_loss(_p[:, local_mask])
@@ -392,6 +411,7 @@ def get_reg_loss(model, reg_type='l1'):
                     loss_3 = lm.compute_loss(_p[local_mask, :][:, global_mask], discount=True)
                     new_loss = loss_1 + loss_2 - loss_3 
             lm.update_loss(new_loss)
+            non_alpha_sum += new_loss
         else:
             # qkvo_proj
             # q: (qk_dim, gl_dim) | bias: qk_dim | global: 
@@ -450,6 +470,25 @@ def get_reg_loss(model, reg_type='l1'):
                     loss_3 = lm.compute_loss(_p[local_mask, :][:, global_mask], discount=True)
                     new_loss = loss_1 + loss_2 - loss_3 
             lm.update_loss(new_loss)
+            non_alpha_sum += new_loss
+
+    ########## For TEST ###############
+    print(f"Alpha  sum: {alpha_sum.item()} | count: {alpha_count} | avg: {alpha_sum.item()/alpha_count:.5f}")
+    non_alpha_count = lm.count - alpha_count
+    print(f"Non-Alpha  sum: {non_alpha_sum.item()} | count: {non_alpha_count} | avg: {non_alpha_sum.item()/non_alpha_count:.5f}")
+    # print(lm.param)
+    # _d = dict(model.named_parameters())
+    # _n = 'encoder.alpha'
+    # _n = 'encoder.layers.3.self_attn.q_proj.bias'
+    # local_key = f'encoder.layers.3.self_attn_qk_c'
+    # print('_n: ', _n)
+    # local_key = f'encoder.embedding_c'
+    # local_mask = pd[local_key]
+    # print("Count: ", lm.count, " | mask_len: ", local_mask.shape[0])
+    # print(_d[_n][local_mask][0:20])
+    # print(_d[_n][0:20])
+    # lm.param = None
+    ####################################
     return lm.get_loss()
 
 
@@ -521,8 +560,12 @@ class SPTCriterion(FairseqCriterion):
         )
         phase = getattr(model, 'phase', 'x')
         if phase == 'pruning' and not scoring:
+            """ Comment for test 
             reg_loss = model.cfg.reg * get_reg_loss(model, reg_type='l1')
             loss += reg_loss
+            """
+            # For test
+            reg_loss = torch.zeros_like(loss)
         else:
             reg_loss = torch.zeros_like(loss)
         return loss, nll_loss, reg_loss

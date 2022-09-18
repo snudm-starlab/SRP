@@ -234,7 +234,11 @@ def main(cfg: FairseqConfig) -> None:
             assert self.GLE == self.GLD # For simplify computation of n1
             
             n1 = float(self.GLE * (self.FC * 2 + self.QK * 4 * 2 + self.VO * 4 * 2))
-            n2 = float(self.src_words * self.GLE + self.tar_words * self.GLD)
+            n2 = float(self.src_words * self.GLE + self.tar_words * self.GLD
+                + self.GLE * 2 * 30 + self.QK * 4 * 2 + self.VO * 4 + self.GLE * 18 
+                + self.FC + self.GLE * 12
+            )
+            print("#### Original paramters: ", n1+n2)
             
             A = (n2 / n1)
             B = -1 * compression_rate * (n1 + n2) / n1
@@ -311,6 +315,9 @@ def main(cfg: FairseqConfig) -> None:
 
         # train for one epoch
         valid_losses, should_stop = train(cfg, trainer, task, epoch_itr, pruning_manager=pm)
+        # Check pruning target
+        _params = np.sum([_p.numel() for _n, _p in trainer.model.named_parameters()
+                          if _n[-2:] != '_c'])
         
         ##################### SPT  Pruning ##########################
         # gl_dict = get_group_sum(trainer.model) 
@@ -333,8 +340,6 @@ def main(cfg: FairseqConfig) -> None:
                     setattr(trainer.model, 'phase', 'fine-tuning')
                 pm._count = 0
 
-        # Check pruning target
-        _params = np.sum([_p.numel() for _p in trainer.model.parameters()])
 
         # print pruning status
         
@@ -482,7 +487,7 @@ def train(
     num_updates = trainer.get_num_updates()
     logger.info("Start iterating over samples")
 
-    if trainer.model.phase == 'pruning':
+    if trainer.model.phase == 'pruning' and getattr(pruning_manager, "_count", "No_Count") == 0:
         scoring=True
     else:
         scoring=False
@@ -493,7 +498,7 @@ def train(
         ):
             log_output = trainer.train_step(samples, scoring=scoring)
 
-        if scoring and getattr(pruning_manager, '_count', None) == 0:
+        if scoring:
             # Scoring groups at the beginning of every epoch
             gle, gld, fc, qk, vo = pruning_manager.get()
             print("#######################################")
@@ -523,7 +528,7 @@ def train(
 
             trainer.model.zero_grad()
             trainer.zero_grad()
-            scoring=False
+            scoring = False
             continue
 
 

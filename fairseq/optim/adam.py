@@ -165,6 +165,11 @@ class Adam(torch.optim.Optimizer):
             closure (callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
+        '''
+        ########### For Test ################
+        is_first = True
+        #####################################
+        '''
         loss = None
         if closure is not None:
             loss = closure()
@@ -232,7 +237,35 @@ class Adam(torch.optim.Optimizer):
                     p_data_fp32.add_(
                         p_data_fp32, alpha=-group["weight_decay"] * group["lr"]
                     )
+                
+                ################## FOR TEST  ###########################
+                """
+                # print("LR: ", group["lr"])
 
+                if is_first:
+                    print("=="*30)
+                    print("p[0]: ", p[0])
+                    print("p.grad[0]: ", p.grad[0])
+                    print("* step_size: ", step_size)
+                    # print(exp_avg.shape, denom.shape)
+                    print("* exp_avg/denom * step_size", exp_avg[0] /denom[0] * step_size)
+                    # print("* exp_avg[0]: ", exp_avg[0])
+                    # print("* denom[0]: ", denom[0])
+                    print("=="*30)
+                    is_first=False
+                    
+                else:
+                    # print("step_size: ", step_size)
+                    pass
+
+                
+                # print("exp_avg: ", exp_avg)
+                # print("denom: ", denom)
+                # print("=="*30)
+                # step_size = 1.
+                """
+                ######################################################
+                
                 p_data_fp32.addcdiv_(exp_avg, denom, value=-step_size)
 
                 if p.data.dtype in {torch.float16, torch.bfloat16}:

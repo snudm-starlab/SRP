@@ -953,10 +953,19 @@ class Trainer(object):
                 # Note: (sample_size or 1.0) handles the case of a zero gradient, in a
                 # way that avoids CPU/device transfers in case sample_size is a GPU or
                 # TPU object. The assumption is that the gradient itself is also 0.
+            """ 
+            ################# For L1 reg test ############################
+            _d = dict(self.model.named_parameters())
+            print("=="*30)
+            _n = 'encoder.alpha'
+            print("Alpha: ", _d[_n][0:20])
+            print("Grad: ", _d[_n].grad[0:20])
+            ##############################################################
+            """
 
             with torch.autograd.profiler.record_function("clip-grads"):
                 # clip grads
-                grad_norm = self.clip_grad_norm(self.cfg.optimization.clip_norm)
+                grad_norm = self.clip_grad_norm(self.cfg.optimization.clip_norm)            
 
             # check that grad norms are consistent across workers
             # on tpu check tensor is slow
@@ -991,7 +1000,14 @@ class Trainer(object):
                             return self.train_step(
                                 samples, raise_oom
                             )  # recursion to feed in same batch
-
+            """
+            ################# For L1 reg test ############################
+            _d = dict(self.model.named_parameters())
+            _n = 'encoder.alpha'
+            print("After step: ", _d[_n][0:20])
+            print("=="*30)
+            ##############################################################
+            """
         except FloatingPointError:
 
             self.consolidate_optimizer()
