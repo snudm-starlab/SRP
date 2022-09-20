@@ -806,9 +806,15 @@ class Trainer(object):
         if scoring:
             self.model.eval()
             self.criterion.eval()
+            for _n, _p in self.model.named_parameters():
+                if _n[-2:] == "_c":
+                    _p.requires_grad=True
         else:
             self.model.train()
             self.criterion.train()
+            for _n, _p in self.model.named_parameters():
+                if _n[-2:] == "_c":
+                    _p.requires_grad=False
         self.zero_grad()
 
         metrics.log_start_time("train_wall", priority=800, round=0)
@@ -986,6 +992,8 @@ class Trainer(object):
 
             #### Perform optimizer step
             if not scoring:
+                if self.model.phase == 'pruning':
+                    self.optimizer._optimizer.remove_grads(_model=self.model)
                 with torch.autograd.profiler.record_function("optimizer"):
                     # take an optimization step
                     self.task.optimizer_step(
