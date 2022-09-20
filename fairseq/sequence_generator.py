@@ -782,10 +782,12 @@ class EnsembleModel(nn.Module):
         if not self.has_encoder():
             return None
         def _forward_encoder(model, net_input):
-            if hasattr(model, "pruning_manager"):
+            if hasattr(model, "pruning_manager"): # SPT
                 _dev = model.encoder.embedding_c.data.device
                 pos_emb_mask = model.pruning_manager.get_embedding_mask("encoder", _dev=_dev)
-                return model.encoder.forward_torchscript(net_input, pos_emb_mask=pos_emb_mask)
+                compute_c = (model.phase == 'pruning')
+                return model.encoder.forward_torchscript(net_input, pos_emb_mask=pos_emb_mask,
+                                                        compute_c=compute_c)
             else:
                 return model.encoder.forward_torchscript(net_input)
 
@@ -805,10 +807,13 @@ class EnsembleModel(nn.Module):
         for i, model in enumerate(self.models):
             ############################## For SPT #########################################
             if hasattr(model, "pruning_manager"):
+                # Model is SPT
                 _dev = model.encoder.embedding_c.data.device
                 pos_emb_mask = model.pruning_manager.get_embedding_mask("encoder", _dev=_dev)
+                compute_c = (model.phase == 'pruning')
             else:
                 pos_emb_mask = None
+                compute_c = False
             #################################################################################
             if self.has_encoder():
                 encoder_out = encoder_outs[i]
@@ -820,6 +825,7 @@ class EnsembleModel(nn.Module):
                         encoder_out=encoder_out,
                         incremental_state=incremental_states[i],
                         pos_emb_mask=pos_emb_mask,
+                        compute_c=compute_c,
                     )
                 else:
                     decoder_out = model.decoder.forward(
@@ -832,7 +838,8 @@ class EnsembleModel(nn.Module):
                 if hasattr(model, "decoder"):
                     if pos_emb_mask is not None:
                         decoder_out = model.decoder.forward(tokens, encoder_out=encoder_out, 
-                                                            pos_emb_mask=pos_emb_mask)
+                                                            pos_emb_mask=pos_emb_mask, 
+                                                            compute_c=compute_c)
                     else:
                         decoder_out = model.decoder.forward(tokens, encoder_out=encoder_out)
 
