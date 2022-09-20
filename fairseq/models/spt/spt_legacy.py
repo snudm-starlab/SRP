@@ -312,12 +312,12 @@ def spt_iwslt_de_en_small(args):
 
 @register_model_architecture("spt", "spt_iwslt_de_en_small2")
 def spt_iwslt_de_en_small2(args):
-    args.encoder_embed_dim = getattr(args, "encoder_embed_dim", 220)
-    args.encoder_ffn_embed_dim = getattr(args, "encoder_ffn_embed_dim", 660)
+    args.encoder_embed_dim = getattr(args, "encoder_embed_dim", 32)
+    args.encoder_ffn_embed_dim = getattr(args, "encoder_ffn_embed_dim", 60)
     args.encoder_attention_heads = getattr(args, "encoder_attention_heads", 4)
     args.encoder_layers = getattr(args, "encoder_layers", 6)
-    args.decoder_embed_dim = getattr(args, "decoder_embed_dim", 220)
-    args.decoder_ffn_embed_dim = getattr(args, "decoder_ffn_embed_dim", 660)
+    args.decoder_embed_dim = getattr(args, "decoder_embed_dim", 32)
+    args.decoder_ffn_embed_dim = getattr(args, "decoder_ffn_embed_dim", 60)
     args.decoder_attention_heads = getattr(args, "decoder_attention_heads", 4)
     args.decoder_layers = getattr(args, "decoder_layers", 6)
     base_architecture(args)
