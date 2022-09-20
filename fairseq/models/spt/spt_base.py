@@ -140,7 +140,6 @@ class SPTModelBase(FairseqEncoderDecoderModel):
         features_only: bool = False,
         alignment_layer: Optional[int] = None,
         alignment_heads: Optional[int] = None,
-        scoring: bool = False,
     ):
         """
         Run the forward pass for an encoder-decoder model.
@@ -148,6 +147,11 @@ class SPTModelBase(FairseqEncoderDecoderModel):
         Copied from the base class, but without ``**kwargs``,
         which are not supported by TorchScript.
         """
+        if getattr(self, 'phase', None) == "pruning":
+            compute_c = True
+        else:
+            compute_c = False
+
         _dev = self.encoder.embedding_c.data.device
 
         enc_pos_emb_mask = self.pruning_manager.get_embedding_mask("encoder", _dev=_dev)
@@ -155,7 +159,7 @@ class SPTModelBase(FairseqEncoderDecoderModel):
         
         encoder_out = self.encoder(
             src_tokens, src_lengths=src_lengths, return_all_hiddens=return_all_hiddens,
-            scoring=scoring, pos_emb_mask=enc_pos_emb_mask,
+            compute_c=compute_c, pos_emb_mask=enc_pos_emb_mask,
         )
         decoder_out = self.decoder(
             prev_output_tokens,
@@ -165,7 +169,7 @@ class SPTModelBase(FairseqEncoderDecoderModel):
             alignment_heads=alignment_heads,
             src_lengths=src_lengths,
             return_all_hiddens=return_all_hiddens,
-            scoring=scoring,
+            compute_c=compute_c,
             pos_emb_mask=dec_pos_emb_mask,
         )
         return decoder_out
@@ -288,6 +292,29 @@ class SPTModelBase(FairseqEncoderDecoderModel):
                                       nn.Parameter(_p.data))
                             continue
     '''
+    @torch.no_grad()
+    def decrease_c(self, ratio):
+        pm = self.pruning_manager
+        pd = pm.pruning_dict
+        
+        _N = 'encoder.layers.0.fc_c'
+        print("+++"*25)
+        print("** Ratio: ", ratio)
+        print("** Before shrinking")
+        print(recursive_get_param(self, _N))
+
+        
+        for _n in pd.keys():
+            _indices = pd[_n]
+            _p = recursive_get_param(self, _n)
+            # Difference
+            _p[_indices] = _p[_indices] - ratio
+            # Multiplication
+            # _p[_indices] = _p[_indices] * ratio
+        print("** After shrinking")
+        print(recursive_get_param(self, _N))
+
+
     @torch.no_grad()
     def pruning(self,):
         pm = self.pruning_manager
