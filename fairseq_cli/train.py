@@ -343,6 +343,8 @@ def main(cfg: FairseqConfig) -> None:
         # Check pruning target
         _params = np.sum([_p.numel() for _n, _p in trainer.model.named_parameters()
                           if _n[-2:] != '_c'])
+        num_groups = trainer.model.get_num_groups()
+        num_groups = [str(_num) for _num in num_groups]
         
         ##################### SPT  Pruning ##########################
         # gl_dict = get_group_sum(trainer.model) 
@@ -371,8 +373,6 @@ def main(cfg: FairseqConfig) -> None:
         # print pruning status
         
         _res = f'{phase[0]},{epoch_itr.epoch},'
-        num_groups = trainer.model.get_num_groups()
-        num_groups = [str(_num) for _num in num_groups]
         _res+= ','.join(num_groups) + ','
         # _group_res = group_report(trainer.model, gl_dict)
         # _res += _group_res
