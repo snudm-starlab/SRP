@@ -473,9 +473,11 @@ def get_reg_loss(model, reg_type='l1'):
             non_alpha_sum += new_loss
 
     ########## For TEST ###############
+    """
     print(f"Alpha  sum: {alpha_sum.item()} | count: {alpha_count} | avg: {alpha_sum.item()/alpha_count:.5f}")
     non_alpha_count = lm.count - alpha_count
     print(f"Non-Alpha  sum: {non_alpha_sum.item()} | count: {non_alpha_count} | avg: {non_alpha_sum.item()/non_alpha_count:.5f}")
+    """
     # print(lm.param)
     # _d = dict(model.named_parameters())
     # _n = 'encoder.alpha'
@@ -513,7 +515,7 @@ class SPTCriterion(FairseqCriterion):
         self.ignore_prefix_size = ignore_prefix_size
         self.report_accuracy = report_accuracy
 
-    def forward(self, model, sample, reduce=True, scoring=False):
+    def forward(self, model, sample, reduce=True):
         """Compute the loss for the given sample.
 
         Returns a tuple with three elements:
@@ -521,8 +523,9 @@ class SPTCriterion(FairseqCriterion):
         2) the sample size, which is used as the denominator for the gradient
         3) logging outputs to display while training
         """
-        net_output = model(**sample["net_input"], scoring=scoring)
-        loss, nll_loss, reg_loss = self.compute_loss(model, net_output, sample, reduce=reduce, scoring=scoring)
+            
+        net_output = model(**sample["net_input"])
+        loss, nll_loss, reg_loss = self.compute_loss(model, net_output, sample, reduce=reduce)
         sample_size = (
             sample["target"].size(0) if self.sentence_avg else sample["ntokens"]
         )
@@ -549,7 +552,7 @@ class SPTCriterion(FairseqCriterion):
             target = target[:, self.ignore_prefix_size :].contiguous()
         return lprobs.view(-1, lprobs.size(-1)), target.view(-1)
 
-    def compute_loss(self, model, net_output, sample, reduce=True, scoring=False):
+    def compute_loss(self, model, net_output, sample, reduce=True):
         lprobs, target = self.get_lprobs_and_target(model, net_output, sample)
         loss, nll_loss = label_smoothed_nll_loss(
             lprobs,
@@ -558,16 +561,15 @@ class SPTCriterion(FairseqCriterion):
             ignore_index=self.padding_idx,
             reduce=reduce,
         )
+        """
         phase = getattr(model, 'phase', 'x')
         if phase == 'pruning' and not scoring:
-            """ Comment for test 
             reg_loss = model.cfg.reg * get_reg_loss(model, reg_type='l1')
             loss += reg_loss
-            """
-            # For test
-            reg_loss = torch.zeros_like(loss)
         else:
             reg_loss = torch.zeros_like(loss)
+        """
+        reg_loss = torch.zeros_like(loss) # Legacy
         return loss, nll_loss, reg_loss
 
     def compute_accuracy(self, model, net_output, sample):
