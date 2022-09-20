@@ -203,7 +203,7 @@ class SPTDecoderBase(FairseqIncrementalDecoder):
         alignment_heads: Optional[int] = None,
         src_lengths: Optional[Any] = None,
         return_all_hiddens: bool = False,
-        scoring: bool = False,
+        compute_c: bool = False,
         pos_emb_mask = None,
     ):
         """
@@ -232,12 +232,12 @@ class SPTDecoderBase(FairseqIncrementalDecoder):
             full_context_alignment=full_context_alignment,
             alignment_layer=alignment_layer,
             alignment_heads=alignment_heads,
-            scoring=scoring,
+            compute_c=compute_c,
             pos_emb_mask=pos_emb_mask,
         )
 
         if not features_only:
-            if scoring:
+            if compute_c:
                 x *= self.embedding_c
             x = self.output_layer(x)
         return x, extra
@@ -250,7 +250,7 @@ class SPTDecoderBase(FairseqIncrementalDecoder):
         full_context_alignment: bool = False,
         alignment_layer: Optional[int] = None,
         alignment_heads: Optional[int] = None,
-        scoring: bool = False,
+        compute_c: bool = False,
         pos_emb_mask=None,
     ):
         return self.extract_features_scriptable(
@@ -260,7 +260,7 @@ class SPTDecoderBase(FairseqIncrementalDecoder):
             full_context_alignment,
             alignment_layer,
             alignment_heads,
-            scoring=scoring,
+            compute_c=compute_c,
             pos_emb_mask=pos_emb_mask,
         )
 
@@ -278,7 +278,7 @@ class SPTDecoderBase(FairseqIncrementalDecoder):
         full_context_alignment: bool = False,
         alignment_layer: Optional[int] = None,
         alignment_heads: Optional[int] = None,
-        scoring: bool = False,
+        compute_c: bool = False,
         pos_emb_mask=None,
     ):
         """
@@ -346,7 +346,7 @@ class SPTDecoderBase(FairseqIncrementalDecoder):
         x = self.dropout_module(x)
 
         ################### For SPT ########################
-        if scoring:
+        if compute_c:
             x = x * self.embedding_c
         ####################################################
 
@@ -361,6 +361,7 @@ class SPTDecoderBase(FairseqIncrementalDecoder):
         # decoder layers
         attn: Optional[Tensor] = None
         inner_states: List[Optional[Tensor]] = [x]
+        prev_ln_c = self.embedding_c
         for idx, layer in enumerate(self.layers):
             if incremental_state is None and not full_context_alignment:
                 self_attn_mask = self.buffered_future_mask(x)
@@ -376,11 +377,13 @@ class SPTDecoderBase(FairseqIncrementalDecoder):
                 self_attn_padding_mask=self_attn_padding_mask,
                 need_attn=bool((idx == alignment_layer)),
                 need_head_weights=bool((idx == alignment_layer)),
-                scoring=scoring
+                prev_ln_c=prev_ln_c,
+                compute_c=compute_c,
             )
             inner_states.append(x)
             if layer_attn is not None and idx == alignment_layer:
                 attn = layer_attn.float().to(x)
+            prev_ln_c = layer.fc_ln_c
 
         if attn is not None:
             if alignment_heads is not None:
