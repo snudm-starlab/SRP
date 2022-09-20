@@ -151,7 +151,7 @@ class SPTEncoderBase(FairseqEncoder):
         src_lengths: Optional[torch.Tensor] = None,
         return_all_hiddens: bool = False,
         token_embeddings: Optional[torch.Tensor] = None,
-        scoring: bool = False,
+        compute_c: bool = False,
         pos_emb_mask = None,
     ):
         """
@@ -179,7 +179,7 @@ class SPTEncoderBase(FairseqEncoder):
         """
         return self.forward_scriptable(
             src_tokens, src_lengths, return_all_hiddens, 
-            token_embeddings, scoring, pos_emb_mask
+            token_embeddings, compute_c, pos_emb_mask
         )
 
     # TorchScript doesn't support super() method so that the scriptable Subclass
@@ -192,7 +192,7 @@ class SPTEncoderBase(FairseqEncoder):
         src_lengths: Optional[torch.Tensor] = None,
         return_all_hiddens: bool = False,
         token_embeddings: Optional[torch.Tensor] = None,
-        scoring: bool = False,
+        compute_c: bool = False,
         pos_emb_mask = None,
     ):
         """
@@ -227,7 +227,7 @@ class SPTEncoderBase(FairseqEncoder):
         x *= (self.alpha / self.alpha_init)
 
         ############## For SPT #######################
-        if scoring:
+        if compute_c:
             x = x * self.embedding_c
         ##############################################
 
@@ -244,10 +244,11 @@ class SPTEncoderBase(FairseqEncoder):
         if return_all_hiddens:
             encoder_states.append(x)
         # encoder layers
+        prev_ln_c = self.embedding_c
         for layer in self.layers:
             lr = layer(
                 x, encoder_padding_mask=encoder_padding_mask if has_pads else None,
-                scoring=scoring
+                compute_c=compute_c, prev_ln_c = prev_ln_c,
             )
 
             if isinstance(lr, tuple) and len(lr) == 2:
@@ -260,6 +261,7 @@ class SPTEncoderBase(FairseqEncoder):
                 assert encoder_states is not None
                 encoder_states.append(x)
                 fc_results.append(fc_result)
+            prev_ln_c = layer.fc_ln_c
 
         if self.layer_norm is not None:
             x = self.layer_norm(x)
