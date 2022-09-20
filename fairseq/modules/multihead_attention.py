@@ -391,9 +391,17 @@ class MultiheadAttention(nn.Module):
                 k = self.k_proj(key)
                 v = self.v_proj(value)
             q *= self.scaling
+
             ########## For scoring connections ###############
             if qk_c is not None:
-                k *= qk_c
+                # k *= qk_c
+                ################ FOR SPT TEST #############
+                try:
+                    k *= qk_c
+                except Exception:
+                    # Use saved k that is already multiplied by k
+                    pass
+                ###########################################
             ##################################################
 
             if self.bias_k is not None:
