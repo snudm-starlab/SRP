@@ -272,6 +272,191 @@ class Adam(torch.optim.Optimizer):
                     p.data.copy_(p_data_fp32)
 
         return loss
+    
+    @torch.no_grad()
+    def remove_grads(self, _model):
+        # remove gradient and exp avg, exp_avg_sq
+        pm = _model.pruning_manager
+        pd = pm.pruning_dict
+
+        en_heads = _model.cfg.encoder.attention_heads
+        de_heads = _model.cfg.decoder.attention_heads
+
+        named_params = list(_model.named_parameters())
+        # param_list = list(_model.parameters())
+        param_list = []
+        param_names = []
+        for _n, _p in _model.named_parameters():
+            if _n[-2:] == "_c":
+                continue
+            param_list.append(_p)
+            param_names.append(_n)
+            
+        # _dict = {}
+        # model_params = list(param_list)
+        # self.param_groups[0]['params'] = param_list
+
+        # named_params = list(_model.named_parameters())
+
+        def get_pruning_mask(max_len, pruning_indices):
+            _mask = torch.ones(max_len).bool()
+            _mask[pruning_indices] = False
+            return _mask
+
+        _i = 0
+        for _k, _v in self.state.items():
+            _n = param_names[_i]
+            _p = param_list[_i]
+            _shape = _v['exp_avg'].shape
+            if _n[-2:] == "_c" :
+                continue
+
+            elif 'alpha' in _n: 
+                ende = _n.split('.')[0]
+                _key = f"{ende}.embedding_c"
+                _indices = pd[_key] if _key in pd else []
+
+                _p.grad[_indices] = 0.
+                _v['exp_avg'][_indices] = 0.
+                _v['exp_avg_sq'][_indices] = 0.
+                
+
+            elif 'embed_tokens' in _n:
+                ende = _n.split('.')[0]
+                _key = f"{ende}.embedding_c"
+                _indices = pd[_key] if _key in pd else []
+
+                _p.grad[:,_indices] = 0.
+                _v['exp_avg'][:,_indices] = 0.
+                _v['exp_avg_sq'][:,_indices] = 0.
+            elif 'output_projection' in _n:
+                continue
+
+            elif 'layer_norm' in _n:
+                ende, ly, type, wb = _parsing(_n)
+                if 'self' in type:
+                    _type = 'self_attn'
+                elif 'encoder' in type:
+                    _type = 'encoder_attn'
+                else:
+                    _type = 'fc'
+                _key = f"{ende}.layers.{ly}.{_type}_ln_c"
+                _indices = pd[_key] if _key in pd else []
+                _p.grad[_indices] = 0.
+                _v['exp_avg'][_indices] = 0.
+                _v['exp_avg_sq'][_indices] = 0.
+
+            elif 'fc' in _n:
+                # fc layers
+                # fc1: (gl_dim, fc_dim) | bias: fc_dim | global: prev_sub
+                # fc2: (fc_dim, gl_dim) | bias: fc_dim | global: prev_sub
+                ende, ly, type, wb = _parsing(_n)
+
+                # Get global and local masks
+                if ende == 'encoder':
+                    global_key = f'{ende}.layers.{ly}.self_attn_ln_c'
+                else:
+                    # decoder
+                    global_key = f'{ende}.layers.{ly}.encoder_attn_ln_c'
+                local_key = f'{ende}.layers.{ly}.fc_c'
+
+                global_indices = pd[global_key] if global_key in pd else []
+                local_indices = pd[local_key] if local_key in pd else []
+
+                if 'fc2' in _n:
+                    if 'bias' in _n:
+                        _p.grad[global_indices] = 0.
+                        _v['exp_avg'][global_indices] = 0.
+                        _v['exp_avg_sq'][global_indices] = 0.
+                    else:
+                        _p.grad[global_indices, :] = 0.
+                        _p.grad[:, local_indices] = 0.
+
+                        _v['exp_avg'][global_indices,:] = 0.
+                        _v['exp_avg'][:,local_indices] = 0.
+                        _v['exp_avg_sq'][global_indices,:] = 0.
+                        _v['exp_avg_sq'][:,local_indices] = 0.
+
+                else:
+                    if 'bias' in _n:
+                        _p.grad[local_indices] = 0.
+                        _v['exp_avg'][local_indices] = 0.
+                        _v['exp_avg_sq'][local_indices] = 0.
+                    else:
+                        _p.grad[:,global_indices] = 0.
+                        _p.grad[local_indices,:] = 0.
+
+                        _v['exp_avg'][:,global_indices] = 0.
+                        _v['exp_avg'][local_indices,:] = 0.
+                        _v['exp_avg_sq'][:,global_indices] = 0.
+                        _v['exp_avg_sq'][local_indices,:] = 0.
+
+            else:
+                # qkvo_proj
+                # q: (qk_dim, gl_dim) | bias: qk_dim | global: 
+                # k: (qk_dim, gl_dim) | bias: qk_dim | global: 
+                # v: (vo_dim, gl_dim) | bias: vo_dim | global: 
+                # o: (gl_dim, vo_dim) | bias: gl_dim | global: previous sub-layer ln_c
+                
+                ende, ly, type, wb = _parsing(_n)
+                # Get global and local masks
+                if 'self_attn' in _n:
+                    if ly == '0':
+                        global_key = f'{ende}.embedding_c'
+                    else:
+                        global_key = f'{ende}.layers.{int(ly)-1}.fc_ln_c'
+                    if 'q_proj' in _n or 'k_proj' in _n:
+                        local_key = f'{ende}.layers.{ly}.self_attn_qk_c'
+                    else:
+                        local_key = f'{ende}.layers.{ly}.self_attn_vo_c'
+                else:
+                    # encoder_attn
+                    global_key = f'{ende}.layers.{ly}.self_attn_ln_c'
+                    if 'q_proj' in _n or 'k_proj' in _n:
+                        local_key = f'{ende}.layers.{ly}.encoder_attn_qk_c'
+                    else:
+                        local_key = f'{ende}.layers.{ly}.encoder_attn_vo_c'
+
+                # q: (qk_dim, gl_dim) | bias: qk_dim | global: 
+                # k: (qk_dim, gl_dim) | bias: qk_dim | global: 
+                # v: (vo_dim, gl_dim) | bias: vo_dim | global: 
+
+                global_indices = pd[global_key] if global_key in pd else []
+                local_indices = pd[local_key] if local_key in pd else []
+
+                # Compute loss 
+                if 'out_proj' in _n:
+                    if 'bias' in _n:
+                        _p.grad[global_indices] = 0.
+                        _v['exp_avg'][global_indices] = 0.
+                        _v['exp_avg_sq'][global_indices] = 0.
+                    else:
+                        _p.grad[global_indices, :] = 0.
+                        _p.grad[:, local_indices] = 0.
+
+                        _v['exp_avg'][global_indices,:] = 0.
+                        _v['exp_avg'][:,local_indices] = 0.
+                        _v['exp_avg_sq'][global_indices,:] = 0.
+                        _v['exp_avg_sq'][:,local_indices] = 0.
+                else:
+                    if 'bias' in _n:
+                        _p.grad[local_indices] = 0.
+                        _v['exp_avg'][local_indices] = 0.
+                        _v['exp_avg_sq'][local_indices] = 0.
+                    else:
+                        _p.grad[:,global_indices] = 0.
+                        _p.grad[local_indices,:] = 0.
+
+                        _v['exp_avg'][:,global_indices] = 0.
+                        _v['exp_avg'][local_indices,:] = 0.
+                        _v['exp_avg_sq'][:,global_indices] = 0.
+                        _v['exp_avg_sq'][local_indices,:] = 0.
+
+            # _dict[param_list[_i]] = _v
+            _i+=1
+        # self.state = _dict
+        
+
 
     def pruning(self, _model):
         pm = _model.pruning_manager
