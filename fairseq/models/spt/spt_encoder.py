@@ -129,6 +129,7 @@ class SPTEncoderBase(FairseqEncoder):
         self, src_tokens, token_embedding: Optional[torch.Tensor] = None,
         pos_emb_mask = None,
     ):
+
         # embed tokens and positions
         if token_embedding is None:
             token_embedding = self.embed_tokens(src_tokens)
@@ -225,7 +226,7 @@ class SPTEncoderBase(FairseqEncoder):
         x, encoder_embedding = self.forward_embedding(src_tokens, token_embeddings, 
                                 pos_emb_mask = pos_emb_mask)
         x *= (self.alpha / self.alpha_init)
-
+        
         ############## For SPT #######################
         if compute_c:
             x = x * self.embedding_c
@@ -250,7 +251,7 @@ class SPTEncoderBase(FairseqEncoder):
                 x, encoder_padding_mask=encoder_padding_mask if has_pads else None,
                 compute_c=compute_c, prev_ln_c = prev_ln_c,
             )
-
+            
             if isinstance(lr, tuple) and len(lr) == 2:
                 x, fc_result = lr
             else:

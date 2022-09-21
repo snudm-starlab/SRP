@@ -44,6 +44,7 @@ class SPTModelBase(FairseqEncoderDecoderModel):
         super().__init__(encoder, decoder)
         self.cfg = cfg
         self.supports_align_args = True
+        self.phase = None
 
     @classmethod
     def add_args(cls, parser):
@@ -329,12 +330,14 @@ class SPTModelBase(FairseqEncoderDecoderModel):
             return _mask
 
         for _n, _p in self.named_parameters():
-            
             if _n[-2:] == "_c" :
                 _indices = pd[_n] if _n in pd else []
                 mask = get_pruning_mask(_p.shape, _indices) # its name is its key
                 set_param(self, _n, nn.Parameter(_p.data[mask]))
                 continue  
+            elif '_indices' in _n:
+                set_param(self, _n, nn.Parameter(_p.data, requires_grad=False))
+                continue
 
             elif 'alpha' in _n: 
                 ende = _n.split('.')[0]
