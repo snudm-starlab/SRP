@@ -307,6 +307,10 @@ class Adam(torch.optim.Optimizer):
         for _k, _v in self.state.items():
             _n = param_names[_i]
             _p = param_list[_i]
+            
+            if not _p.requires_grad:
+                continue
+
             _shape = _v['exp_avg'].shape
             if _n[-2:] == "_c" :
                 continue
@@ -470,7 +474,9 @@ class Adam(torch.optim.Optimizer):
         param_list = []
         param_names = []
         for _n, _p in _model.named_parameters():
-            if _n[-2:] == "_c":
+            if '_indices' in _n:
+                continue
+            if _n[-2:] == "_c" or not _p.requires_grad:
                 continue
             param_list.append(_p)
             param_names.append(_n)
@@ -517,6 +523,9 @@ class Adam(torch.optim.Optimizer):
 
                 # set_param(self, _n, nn.Parameter(_p.data[mask]))
                 """
+                continue
+
+            elif '_indices' in _n:
                 continue
 
             elif 'alpha' in _n: 

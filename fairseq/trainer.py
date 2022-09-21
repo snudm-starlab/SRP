@@ -297,7 +297,7 @@ class Trainer(object):
         """
         params = []
         for _n, _p in self.model.named_parameters():
-            if _p.requires_grad and _n[-2:] != '_c':
+            if _p.requires_grad and _n[-2:] != '_c' and '_indices' not in _n:
                 params.append(_p)
         for _p in self.criterion.parameters():
             if _p.requires_grad:
@@ -992,8 +992,12 @@ class Trainer(object):
 
             #### Perform optimizer step
             if not scoring:
+                ############### Freeze selected paramters ####################
+                """
                 if self.model.phase == 'pruning':
                     self.optimizer._optimizer.remove_grads(_model=self.model)
+                """
+                ##############################################################
                 with torch.autograd.profiler.record_function("optimizer"):
                     # take an optimization step
                     self.task.optimizer_step(
