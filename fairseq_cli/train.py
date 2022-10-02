@@ -25,6 +25,7 @@ logger = logging.getLogger("fairseq_cli.train")
 
 import numpy as np
 import torch
+import torch.nn as nn
 from omegaconf import DictConfig, OmegaConf
 
 from fairseq import checkpoint_utils, options, quantization_utils, tasks, utils
@@ -98,6 +99,13 @@ def main(cfg: FairseqConfig) -> None:
 
     ############# Perform shaping Model for loading Pruned Model #################
     # For spt
+ 
+    _src_words = model.encoder.embed_tokens.weight.shape[0]
+    _tar_words = model.decoder.embed_tokens.weight.shape[0]
+    pm = PruningManager(cfg, _src_words, _tar_words)
+
+    setattr(model, "pruning_manager", pm)
+
     # pass checkpoint path and shaving model
     pretrained_model = f'{cfg.checkpoint.save_dir}/{cfg.checkpoint.restore_file}'
     if os.path.isfile(pretrained_model):
@@ -189,6 +197,16 @@ def main(cfg: FairseqConfig) -> None:
         # don't cache epoch iterators for sharded datasets
         disable_iterator_cache=task.has_sharded_data("train"),
     )
+
+    if extra_state is not None and 'pruning_manager' in extra_state:
+        trainer.model.pruning_manager = extra_state['pruning_manager']
+        """
+        _dev = trainer.model.encoder.embedding_c.device
+        trainer.model.pruning_manager.encoder_indices = \
+            trainer.model.pruning_manager.encoder_indices.to(_dev)
+        trainer.model.pruning_manager.decoder_indices = \
+            trainer.model.pruning_manager.decoder_indices.to(_dev)
+        """
     ##############################################################
 
 
@@ -204,131 +222,33 @@ def main(cfg: FairseqConfig) -> None:
     train_meter.start()
     
     ######################## For STP #######################
-    class PruningManager():
-        def __init__(self, cfg, src_words, tar_words): 
-            self.src_words = src_words
-            self.tar_words = tar_words
-            
-            self.en_layers = cfg.model.encoder_layers
-            self.de_layers = cfg.model.decoder_layers
-
-            self.en_heads = cfg.model.encoder_attention_heads
-            self.de_heads = cfg.model.decoder_attention_heads
-
-            self.GLE = cfg.model.encoder_embed_dim
-            self.GLD = cfg.model.decoder_embed_dim
-            self.FC = cfg.model.encoder_ffn_embed_dim * self.en_layers \
-                    + cfg.model.decoder_ffn_embed_dim * self.de_layers
-            self.QK = cfg.model.encoder_embed_dim // self.en_heads * self.en_layers \
-                    + cfg.model.decoder_embed_dim // self.de_heads * self.de_layers * 2 
-            self.VO = cfg.model.encoder_embed_dim // self.en_heads * self.en_layers \
-                    + cfg.model.decoder_embed_dim // self.de_heads * self.de_layers * 2 
-
-            self.count = 0
-
-            self.pruning_dict = None
-
-            # Compute pruing ratio
-            self.step_per_epoch = 1102 #TODO: step per epoch is hard-coded
-            self.n = cfg.common.pruning_iter
-            self.compression_rate = cfg.common.compression_rate
-        
-            # self.P = 1 - np.sqrt(cfg.common.compression_rate)
-            self.P = 1-self.get_pruning_rate(self.compression_rate)
-            self.p = 1 - (1-self.P) ** (1/self.n) 
-
-            # For positional embedding
-            self.encoder_orig_dim = cfg.model.encoder_embed_dim
-            self.decoder_orig_dim = cfg.model.decoder_embed_dim
-
-            self.encoder_indices = torch.arange(self.encoder_orig_dim)
-            self.decoder_indices = torch.arange(self.decoder_orig_dim)
-            
-            # For same percentage
-            # self.c_shrink_rate = (1e-5) ** (1/ (cfg.common.pruning_period * self.step_per_epoch))
-            # For same difference
-            # self.c_shrink_rate =  ((1-1e-5) / (cfg.common.pruning_period * self.step_per_epoch-1))
-            # shirnk c every epoch
-            self.c_shrink_rate =  (1 / (cfg.common.pruning_period-1))
-
-        def get_pruning_rate(self, compression_rate):
-            assert self.GLE == self.GLD # For simplify computation of n1
-            assert self.en_heads == self.de_heads
-
-            n1 = float(self.GLE * (self.FC * 2 + self.QK * self.en_heads * 2 + self.VO * self.en_heads * 2))
-            n2 = float(self.src_words * self.GLE + self.tar_words * self.GLD
-                + self.GLE * 2 * (2*self.en_layers + 3*self.de_layers) # layer_norm
-                + self.QK * self.en_heads * 2 
-                + self.VO * self.en_heads + self.GLE * (self.en_layers + self.de_layers * 2)
-                + self.FC + self.GLE * (self.en_layers + self.de_layers)
-            )
-            print("#### Original paramters: ", n1+n2) 
-            A = (n2 / n1)
-            B = -1 * compression_rate * (n1 + n2) / n1
-            
-            p = (-1 * A + np.sqrt(A ** 2 - 4 * B) ) / 2
-            return p 
-
-
-        def get(self, ):
-            assert self.count < self.n
-            self.count += 1
-            gle = int(np.ceil(self.GLE * self.p))
-            gld = int(np.ceil(self.GLD * self.p))
-            fc = int(np.ceil(self.FC * self.p))
-            qk = int(np.ceil(self.QK * self.p))
-            vo = int(np.ceil(self.VO * self.p))
-
-            self.GLE -= gle
-            self.GLD -= gld
-            self.FC -= fc
-            self.QK -= qk
-            self.VO -= vo
-            
-            return gle, gld, fc, qk, vo
-
-        def update_embedding_mask(self, emb_mask, ende):
-            # emb_mask: indices for pruning (len: pruned_len)
-            # self.encoder_indices: len: orig_dim
-            # 0, 1, 2, ...... , 511
-            if ende == 'encoder':
-                emb_mask2 = torch.zeros(self.GLE + emb_mask.shape[0]).bool()
-                emb_mask2[emb_mask] = True
-                self.encoder_indices = self.encoder_indices[~emb_mask2]
-            else:
-                emb_mask2 = torch.zeros(self.GLD + emb_mask.shape[0]).bool()
-                emb_mask2[emb_mask] = True
-                self.decoder_indices = self.decoder_indices[~emb_mask2]
-
-        def get_embedding_mask(self, ende, _dev='cpu'):
-            if ende == 'encoder':
-                _mask = torch.zeros(self.encoder_orig_dim).bool()
-                _mask[self.encoder_indices] = True
-            else:
-                _mask = torch.zeros(self.decoder_orig_dim).bool()
-                _mask[self.decoder_indices] = True
-            _mask = _mask.to(_dev)
-            return _mask
- 
-    _src_words = trainer.model.encoder.embed_tokens.weight.shape[0]
-    _tar_words = trainer.model.decoder.embed_tokens.weight.shape[0]
-    pm = PruningManager(cfg, _src_words, _tar_words)
-    setattr(trainer.model, "pruning_manager", pm)
-    setattr(trainer.model, 'phase', 'warming-up')
-
-    pruning_count = 0
     # phase: 'pruning' or 'fine-tuning'
+    setattr(trainer.model, 'phase', 'warming-up')
+    pruning_count = 0
     #########################################################
-
+    
+    is_first_epoch = True
     while epoch_itr.next_epoch_idx <= max_epoch:
-        phase = getattr(trainer.model, 'phase')
-        if (phase == 'warming-up') and (epoch_itr.epoch >= cfg.common.warming_up):
-            setattr(trainer.model, 'phase', 'pruning')
-            setattr(pm, '_count', 0)
-            phase = getattr(trainer.model, 'phase')
-            print(f"* End of {cfg.common.warming_up} warming-up epochs. Turn into 'pruning' phase")
-            # print(f"\n**** {epoch_itr.epoch+1}/{cfg.common.warming_up} | change phase 'warming-up' to 'pruning'\n")
+        # Determine phase and performe pruning
+        if is_first_epoch:
+            _epoch = epoch_itr.epoch
+            is_first_epoch = False
+        else:   
+            _epoch = epoch_itr.epoch + 1
+        _phase, do_pruning = trainer.model.pruning_manager.get_phase(_epoch)
         
+        print(f"\n * Epoch {_epoch} | phase: {_phase}")
+        setattr(trainer.model, 'phase', _phase)
+
+        if do_pruning:
+            pruning_count += 1
+            print(f"\n*** Perform {pruning_count}-th pruning ***'\n")
+            trainer.model.pruning()
+            trainer.optimizer._optimizer.pruning(trainer.model)
+            pm.update_embedding_mask(
+                pm.pruning_dict['encoder.embedding_c'], 'encoder')
+            pm.update_embedding_mask(
+                pm.pruning_dict['decoder.embedding_c'], 'decoder')              
 
         if lr <= cfg.optimization.stop_min_lr:
             logger.info(
@@ -337,9 +257,10 @@ def main(cfg: FairseqConfig) -> None:
                 f"(--stop-min-lr={cfg.optimization.stop_min_lr})"
             )
             break
-
+        print("* Current embedding_c: ",  trainer.model.decoder.embedding_c)
         # train for one epoch
         valid_losses, should_stop = train(cfg, trainer, task, epoch_itr, pruning_manager=pm)
+        # print("* After training an epoch: ", epoch_itr.epoch)
         # Check pruning target
         _params = np.sum([_p.numel() for _n, _p in trainer.model.named_parameters()
                           if _n[-2:] != '_c'])
@@ -347,32 +268,8 @@ def main(cfg: FairseqConfig) -> None:
         num_groups = [str(_num) for _num in num_groups]
         
         ##################### SPT  Pruning ##########################
-        # gl_dict = get_group_sum(trainer.model) 
-        if phase == 'pruning':
-            # Get Group sum
-            # _eps = cfg.common.prune_eps
-            # local_gl_dic --> k:v = local_key: [local_gl, local_count]
-            # pm._count += 1 # regularization without pruning
-            setattr(pm, '_count', 
-                    (epoch_itr.epoch - cfg.common.warming_up)%cfg.common.pruning_period)
-            if pm._count == 0:
-                print(f"\n**** {epoch_itr.epoch} | Perform pruning #{pruning_count+1}'\n")
-                trainer.model.pruning()
-                trainer.optimizer._optimizer.pruning(trainer.model)
-                pm.update_embedding_mask(
-                    pm.pruning_dict['encoder.embedding_c'], 'encoder')
-                pm.update_embedding_mask(
-                    pm.pruning_dict['decoder.embedding_c'], 'decoder')
-                pruning_count += 1
-                # print(f"# params: {_params}")
-                if pruning_count == cfg.common.pruning_iter:
-                    setattr(trainer.model, 'phase', 'fine-tuning')
-                # pm._count = 0
-
-
-        # print pruning status
-        
-        _res = f'{phase[0]},{epoch_itr.epoch},'
+        # print pruning status        
+        _res = f'{_phase[0]},{epoch_itr.epoch},'
         _res+= ','.join(num_groups) + ','
         # _group_res = group_report(trainer.model, gl_dict)
         # _res += _group_res
@@ -513,16 +410,20 @@ def train(
     should_stop = False
     num_updates = trainer.get_num_updates()
     logger.info("Start iterating over samples")
+    
+    _decreasing = cfg.common.decreasing
 
     if trainer.model.phase == 'pruning':
-        if getattr(pruning_manager, "_count", "No_Count") == 0:
+        if getattr(pruning_manager, "_count", "No_Count") == 1 \
+            or pruning_manager.pruning_period == 1:
             scoring=True
         else:
             scoring=False
-            trainer.model.decrease_c(ratio=pruning_manager.c_shrink_rate)
+            # Epoch-wise decreasing
+            if _decreasing[0] == 'e':
+                trainer.model.decrease_c()
     else:
         scoring=False
-
     for i, samples in enumerate(progress):
         """
         # For SPT, decrease connecivity parameters
@@ -540,7 +441,7 @@ def train(
             # Scoring groups at the beginning of every epoch
             gle, gld, fc, qk, vo = pruning_manager.get()
             print("#"*85)
-            print(f"# groups to remove: GLE ({gle}) | GLD ({gld}) | FC ({fc})  | QK ({qk}) | VO ({vo})#")
+            print(f"* Groups to remove: GLE ({gle}) | GLD ({gld}) | FC ({fc})  | QK ({qk}) | VO ({vo})")
             # scoring_groups(trainer.model)
             pruning_dict = {}
             pruning_dict.update(
@@ -562,15 +463,20 @@ def train(
             # for k in pruning_dict:
             #     print(k, type(pruning_dict[k]))
             pruning_manager.pruning_dict = pruning_dict           
-            print("#"*75)
+            print("#"*85)
 
             trainer.model.zero_grad()
             trainer.zero_grad()
             scoring = False
-            # trainer.model.decrease_c(ratio=pruning_manager.c_shrink_rate)
+            # Epoch-wise decreasing
+            if _decreasing[0] == 'e':
+                trainer.model.decrease_c()
             continue
-
-
+        else:
+            if _decreasing[0] == 's':
+                if trainer.model.phase == 'pruning':
+                    trainer.model.decrease_c()
+            
         if log_output is not None:  # not OOM, overflow, ...
             # log mid-epoch stats
             num_updates = trainer.get_num_updates()
@@ -625,6 +531,7 @@ def _flatten_config(cfg: DictConfig):
     return config
 
 ############### Scoring groups for SPT ######################
+
 '''
 def scoring_groups(model):
     print(" =============== Scoring ===============")
@@ -634,6 +541,150 @@ def scoring_groups(model):
             print("*", _n, ": ", torch.mean(_p.grad))
 '''
 
+class PruningManager():
+    def __init__(self, cfg, src_words, tar_words): 
+        self.src_words = src_words
+        self.tar_words = tar_words
+        
+        self.en_layers = cfg.model.encoder_layers
+        self.de_layers = cfg.model.decoder_layers
+
+        self.en_heads = cfg.model.encoder_attention_heads
+        self.de_heads = cfg.model.decoder_attention_heads
+
+        self.GLE = cfg.model.encoder_embed_dim
+        self.GLD = cfg.model.decoder_embed_dim
+        self.FC = cfg.model.encoder_ffn_embed_dim * self.en_layers \
+                + cfg.model.decoder_ffn_embed_dim * self.de_layers
+        self.QK = cfg.model.encoder_embed_dim // self.en_heads * self.en_layers \
+                + cfg.model.decoder_embed_dim // self.de_heads * self.de_layers * 2 
+        self.VO = cfg.model.encoder_embed_dim // self.en_heads * self.en_layers \
+                + cfg.model.decoder_embed_dim // self.de_heads * self.de_layers * 2 
+
+        self.count = 0
+        self._count = 0
+
+        self.pruning_dict = None
+
+        # Compute pruing ratio    
+        self.step_per_epoch = 1102 #TODO: step per epoch is hard-coded
+        self.pruning_iter = cfg.common.pruning_iter
+        self.pruning_period = cfg.common.pruning_period
+        self.warming_up = cfg.common.warming_up
+        self.compression_rate = cfg.common.compression_rate
+
+        # self.P = 1 - np.sqrt(cfg.common.compression_rate)
+        self.P = 1-self.get_pruning_rate(self.compression_rate)
+        self.p = 1 - (1-self.P) ** (1/self.pruning_iter) 
+
+        # For positional embedding
+        self.encoder_orig_dim = cfg.model.encoder_embed_dim
+        self.decoder_orig_dim = cfg.model.decoder_embed_dim
+
+        self.encoder_indices = torch.arange(self.encoder_orig_dim)
+        self.decoder_indices = torch.arange(self.decoder_orig_dim)
+        
+        self._decreasing = cfg.common.decreasing
+        if self._decreasing == 'eg':
+            self.c_shrink_rate = (1e-5) ** (1/ (cfg.common.pruning_period))
+        elif self._decreasing == 'ea':
+            self.c_shrink_rate =  1 / (cfg.common.pruning_period)
+        elif self._decreasing == 'sg':
+            self.c_shrink_rate = (1e-5) ** (1/ (cfg.common.pruning_period * self.step_per_epoch-1))
+        elif self._decreasing == 'sa':
+            self.c_shrink_rate =  (1 / (cfg.common.pruning_period * self.step_per_epoch-1))
+        else:
+            raise Exception('Not an identified decreasing type')
+
+        # Step-wise shrink (ratio)
+
+
+    def get_pruning_rate(self, compression_rate):
+        assert self.GLE == self.GLD # For simplify computation of n1
+        assert self.en_heads == self.de_heads
+
+        n1 = float(self.GLE * (self.FC * 2 + self.QK * self.en_heads * 2 + self.VO * self.en_heads * 2))
+        n2 = float(self.src_words * self.GLE + self.tar_words * self.GLD
+            + self.GLE * 2 * (2*self.en_layers + 3*self.de_layers) # layer_norm
+            + self.QK * self.en_heads * 2 
+            + self.VO * self.en_heads + self.GLE * (self.en_layers + self.de_layers * 2)
+            + self.FC + self.GLE * (self.en_layers + self.de_layers)
+        )
+        print("#### Original paramters: ", n1+n2) 
+        A = (n2 / n1)
+        B = -1 * compression_rate * (n1 + n2) / n1
+        
+        p = (-1 * A + np.sqrt(A ** 2 - 4 * B) ) / 2
+        return p 
+
+
+    def get(self, ):
+        assert self.count < self.pruning_iter
+        self.count += 1
+        gle = int(np.ceil(self.GLE * self.p))
+        gld = int(np.ceil(self.GLD * self.p))
+        fc = int(np.ceil(self.FC * self.p))
+        qk = int(np.ceil(self.QK * self.p))
+        vo = int(np.ceil(self.VO * self.p))
+
+        self.GLE -= gle
+        self.GLD -= gld
+        self.FC -= fc
+        self.QK -= qk
+        self.VO -= vo
+        
+        return gle, gld, fc, qk, vo
+
+    def update_embedding_mask(self, emb_mask, ende):
+        # emb_mask: indices for pruning (len: pruned_len)
+        # self.encoder_indices: len: orig_dim
+        # 0, 1, 2, ...... , 511
+        if ende == 'encoder':
+            emb_mask2 = torch.zeros(self.GLE + emb_mask.shape[0]).bool()
+            emb_mask2[emb_mask] = True
+            self.encoder_indices.data = self.encoder_indices[~emb_mask2]
+        else:
+            emb_mask2 = torch.zeros(self.GLD + emb_mask.shape[0]).bool()
+            emb_mask2[emb_mask] = True
+            self.decoder_indices.data = self.decoder_indices[~emb_mask2]
+
+    def get_embedding_mask(self, ende, _dev='cpu'):
+        if ende == 'encoder':
+            _mask = torch.zeros(self.encoder_orig_dim).bool()
+            _mask[self.encoder_indices] = True
+        else:
+            _mask = torch.zeros(self.decoder_orig_dim).bool()
+            _mask[self.decoder_indices] = True
+        _mask = _mask.to(_dev)
+        return _mask
+  
+    def get_phase(self, e):
+        if e <= self.warming_up:
+            _p = 'warming-up'
+        elif e <= self.warming_up + self.pruning_iter * self.pruning_period:
+            _p = 'pruning'
+            self._count = (e - self.warming_up) % self.pruning_period
+        else:
+            _p = 'fine-tuning'
+            
+        if self.pruning_period == 1:
+            do_pruning = (e - self.warming_up) > 1 and \
+                         (e - self.warming_up - self.pruning_iter) <= 1
+        else:
+            do_pruning = ((e - self.warming_up) > 1) and \
+                        ((e - self.warming_up) % self.pruning_period == 1) \
+                        and (e - self.warming_up) -  (self.pruning_period * self.pruning_iter) <= 1
+        return _p, do_pruning
+
+
+def get_global_dict(model, gl, ende):
+    gl_dict = {} # k:v = param_name: pruning indices
+    _n = f"{ende}.embedding_c"
+    score = get_attr(model, _n).grad
+    gl_dict[_n] = torch.argsort(score, descending=True)[:gl]
+    return gl_dict
+
+"""
 def get_global_dict(model, gl, ende):
     gl_dict = {} # k:v = param_name: pruning indices
     module_list = ["self_attn", "fc"]
@@ -671,7 +722,6 @@ def get_global_dict(model, gl, ende):
     # gl_dict[_n] = torch.argsort(score, descending=True)[:gl]
     return gl_dict
 
-"""
 def get_global_dict(model, gl, ende):
     gl_dict = {} # k:v = param_name: pruning indices
     module_list = ["self_attn", "fc"]
