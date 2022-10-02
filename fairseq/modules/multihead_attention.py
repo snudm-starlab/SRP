@@ -394,14 +394,7 @@ class MultiheadAttention(nn.Module):
 
             ########## For scoring connections ###############
             if qk_c is not None:
-                # k *= qk_c
-                ################ FOR SPT TEST #############
-                try:
-                    k *= qk_c
-                except Exception:
-                    # Use saved k that is already multiplied by k
-                    pass
-                ###########################################
+                q *= qk_c
             ##################################################
 
             if self.bias_k is not None:
