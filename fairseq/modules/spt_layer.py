@@ -82,10 +82,8 @@ class SPTEncoderLayerBase(nn.Module):
         
         self.self_attn_qk_c = torch.nn.Parameter(torch.ones(self.embed_dim) * c_init)
         self.self_attn_vo_c = torch.nn.Parameter(torch.ones(self.embed_dim) * c_init)
-        self.self_attn_ln_c = torch.nn.Parameter(torch.ones(self.embed_dim) * c_init)
 
         self.fc_c = torch.nn.Parameter(torch.ones(cfg.encoder.ffn_embed_dim) * c_init)
-        self.fc_ln_c = torch.nn.Parameter(torch.ones(self.embed_dim) * c_init)
         
         # Connection parameters
 
@@ -94,10 +92,8 @@ class SPTEncoderLayerBase(nn.Module):
         c_init = self.cfg.c_init
         self.self_attn_qk_c.data.fill_(c_init) #  = torch.ones_like(self.self_attn_qk_c).to(_dev) * c_init
         self.self_attn_vo_c.data.fill_(c_init) # = torch.ones_like(self.self_attn_vo_c).to(_dev) * c_init
-        self.self_attn_ln_c.data.fill_(c_init) # = torch.ones_like(self.self_attn_ln_c).to(_dev) * c_init
 
         self.fc_c.data.fill_(c_init) # = torch.ones_like(self.fc_c.data).to(_dev) * c_init
-        self.fc_ln_c.data.fill_(c_init) #  = torch.ones_like(self).to(_dev) * c_init
 
         
 
@@ -200,7 +196,7 @@ class SPTEncoderLayerBase(nn.Module):
         encoder_padding_mask: Optional[Tensor],
         attn_mask: Optional[Tensor] = None,
         compute_c = False,
-        prev_ln_c = None
+        embedding_c = None
     ):
         """
         Args:
@@ -219,10 +215,6 @@ class SPTEncoderLayerBase(nn.Module):
         """
         
         # Self-attention starts
-        """
-        if scoring:
-            self.reset_c()
-        """
 
         if self.self_attn.v_proj.weight.shape[0] == 0:
             # Skip self-attention
@@ -254,15 +246,17 @@ class SPTEncoderLayerBase(nn.Module):
                 qk_c=qk_c,
                 vo_c=vo_c,
             )
-
-            if compute_c:
-                x *= prev_ln_c
-
             x = self.dropout_module(x)
-            x = self.residual_connection(x, residual)
-            x = self.self_attn_layer_norm(x)
             if compute_c:
-                x *= self.self_attn_ln_c
+                # W_O C_emb
+                x *= embedding_c
+                x = self.residual_connection(x, residual)
+                x = self.self_attn_layer_norm(x, embedding_c=embedding_c)
+                x *= embedding_c
+            else:
+                x = self.residual_connection(x, residual)
+                x = self.self_attn_layer_norm(x)
+
 
         # Self-attention end
         if self.fc1.weight.shape[0] == 0:
@@ -271,21 +265,24 @@ class SPTEncoderLayerBase(nn.Module):
         else:
             residual = x
             x = self.activation_fn(self.fc1(x))
+            x = self.activation_dropout_module_fc1(x)
             if compute_c:
                 x *= self.fc_c
-            x = self.activation_dropout_module_fc1(x)
             x = self.fc2(x)
 
-            if compute_c:
-                x *= self.self_attn_ln_c
 
             fc_result = x
 
             x = self.dropout_module_fc2(x)
-            x = self.residual_connection(x, residual)
-            x = self.final_layer_norm(x)
             if compute_c:
-                x *= self.fc_ln_c
+                x *= embedding_c
+                x = self.residual_connection(x, residual)
+                x = self.final_layer_norm(x, embedding_c=embedding_c)
+                x *= embedding_c
+            else:
+                x = self.residual_connection(x, residual)
+                x = self.final_layer_norm(x)
+
 
         if self.return_fc and not torch.jit.is_scripting():
             return x, fc_result
@@ -423,14 +420,11 @@ class SPTDecoderLayerBase(nn.Module):
         
         self.self_attn_qk_c = torch.nn.Parameter(torch.ones(self.embed_dim) * c_init)
         self.self_attn_vo_c = torch.nn.Parameter(torch.ones(self.embed_dim) * c_init)
-        self.self_attn_ln_c = torch.nn.Parameter(torch.ones(self.embed_dim) * c_init)
 
         self.encoder_attn_qk_c = torch.nn.Parameter(torch.ones(self.embed_dim) * c_init)
         self.encoder_attn_vo_c = torch.nn.Parameter(torch.ones(self.embed_dim) * c_init)
-        self.encoder_attn_ln_c = torch.nn.Parameter(torch.ones(self.embed_dim) * c_init)
 
         self.fc_c = torch.nn.Parameter(torch.ones(cfg.encoder.ffn_embed_dim) * c_init)
-        self.fc_ln_c = torch.nn.Parameter(torch.ones(self.embed_dim) * c_init)
         
         # Connection parameters
 
@@ -471,14 +465,11 @@ class SPTDecoderLayerBase(nn.Module):
         c_init = self.cfg.c_init
         self.self_attn_qk_c.data.fill_(c_init) # = torch.ones(self.embed_dim).to(_dev) * c_init
         self.self_attn_vo_c.data.fill_(c_init) #  = torch.ones(self.embed_dim).to(_dev) * c_init
-        self.self_attn_ln_c.data.fill_(c_init) #  = torch.ones(self.embed_dim).to(_dev) * c_init
 
         self.encoder_attn_qk_c.data.fill_(c_init) #  = torch.ones(self.embed_dim).to(_dev) * c_init
         self.encoder_attn_vo_c.data.fill_(c_init) #  = torch.ones(self.embed_dim).to(_dev) * c_init
-        self.encoder_attn_ln_c.data.fill_(c_init) #  = torch.ones(self.embed_dim).to(_dev) * c_init
 
         self.fc_c.data.fill_(c_init) #  = torch.ones(self.cfg.encoder.ffn_embed_dim).to(_dev) * c_init
-        self.fc_ln_c.data.fill_(c_init) #  = torch.ones(self.embed_dim).to(_dev) * c_init
 
     def prepare_for_onnx_export_(self):
         self.onnx_trace = True
@@ -498,7 +489,7 @@ class SPTDecoderLayerBase(nn.Module):
         self_attn_padding_mask: Optional[torch.Tensor] = None,
         need_attn: bool = False,
         need_head_weights: bool = False,
-        prev_ln_c=None,
+        embedding_c=None,
         compute_c=False,
     ):
         """
@@ -522,7 +513,6 @@ class SPTDecoderLayerBase(nn.Module):
             self_attn_vo_c = self.self_attn_vo_c
             encoder_attn_qk_c = self.encoder_attn_qk_c 
             encoder_attn_vo_c = self.encoder_attn_vo_c
-            self.reset_c()
         else:
             self_attn_qk_c = None
             self_attn_vo_c = None
@@ -582,22 +572,25 @@ class SPTDecoderLayerBase(nn.Module):
                 qk_c=self_attn_qk_c,
                 vo_c=self_attn_vo_c,
                 )
+            
             if self.c_attn is not None:
                 tgt_len, bsz = x.size(0), x.size(1)
                 x = x.view(tgt_len, bsz, self.nh, self.head_dim)
                 x = torch.einsum("tbhd,h->tbhd", x, self.c_attn)
                 x = x.reshape(tgt_len, bsz, self.embed_dim)
             if self.attn_ln is not None:
-                x = self.attn_ln(x)
-            
-            if compute_c:
-                x *= prev_ln_c
+                x = self.attn_ln(x) 
 
             x = self.dropout_module(x)
-            x = self.residual_connection(x, residual)
-            x = self.self_attn_layer_norm(x)
             if compute_c:
-                x *= self.self_attn_ln_c
+                x *= embedding_c
+                x = self.residual_connection(x, residual)
+                x = self.self_attn_layer_norm(x, embedding_c=embedding_c)
+                x *= embedding_c
+            else:
+                x = self.residual_connection(x, residual)
+                x = self.self_attn_layer_norm(x)
+
         
         # Masked self attention end
 
@@ -631,13 +624,16 @@ class SPTDecoderLayerBase(nn.Module):
                     qk_c=encoder_attn_qk_c,
                     vo_c=encoder_attn_vo_c,
                 )
-                if compute_c:
-                    x *= self.self_attn_ln_c
                 x = self.dropout_module(x)
-                x = self.residual_connection(x, residual)
-                x = self.encoder_attn_layer_norm(x)
                 if compute_c:
-                    x *= self.encoder_attn_ln_c
+                    x *= embedding_c
+                    x = self.residual_connection(x, residual)
+                    x = self.encoder_attn_layer_norm(x, embedding_c=embedding_c)
+                    x *= embedding_c
+                else:
+                    x = self.residual_connection(x, residual)
+                    x = self.encoder_attn_layer_norm(x)
+
         # Encoder attention end
 
         if self.fc1.weight.shape[0] == 0:
@@ -646,23 +642,23 @@ class SPTDecoderLayerBase(nn.Module):
         else: 
             residual = x
             x = self.activation_fn(self.fc1(x))
+            x = self.activation_dropout_module_fc1(x)
             if compute_c:
                 x *= self.fc_c
-            x = self.activation_dropout_module_fc1(x)
 
             # if self.ffn_layernorm is not None:
             #     x = self.ffn_layernorm(x)
             x = self.fc2(x)
-            if compute_c:
-                x *= self.encoder_attn_ln_c
             x = self.dropout_module_fc2(x)
-
-            # if self.w_resid is not None:
-            #     residual = torch.mul(self.w_resid, residual)
-            x = self.residual_connection(x, residual)
-            x = self.final_layer_norm(x)
             if compute_c:
-                x *= self.fc_ln_c
+                x *= embedding_c
+                x = self.residual_connection(x, residual)
+                x = self.final_layer_norm(x, embedding_c=embedding_c)
+                x *= embedding_c
+            else:
+                x = self.residual_connection(x, residual)
+                x = self.final_layer_norm(x)
+
         if self.onnx_trace and incremental_state is not None:
             saved_state = self.self_attn._get_input_buffer(incremental_state)
             assert saved_state is not None
