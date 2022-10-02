@@ -40,18 +40,41 @@ class CustomLayerNorm(nn.Module):
         if self.elementwise_affine:
             init.ones_(self.weight)
             init.zeros_(self.bias)
-
-    def forward(self, input: Tensor) -> Tensor:
+    
+    def forward(self, input: Tensor, embedding_c = None) -> Tensor:
         assert len(self.normalized_shape) == 1
         bs, l, emb_dim = input.shape
-
         mu = (torch.sum(input, dim = -1) / self.numel).view(bs, l, 1)
-        _sum = torch.sum((input - mu) ** 2, dim=-1)  + (mu**2).squeeze(2) * (self.numel-emb_dim) 
-        sigma = (torch.sqrt(_sum / self.numel)).view(bs, l, 1)
+        _sum = torch.sum((input - mu) ** 2, dim=-1) + (mu**2).squeeze(2) * (self.numel-emb_dim) 
+        sigma = (torch.sqrt(_sum / self.numel)).view(bs, l, 1)    
+    
+        norm_emb = (input - mu) / (sigma + self.eps)
+        return norm_emb * self.weight + self.bias
+
+    """
+    def forward(self, input: Tensor, embedding_c = None) -> Tensor:
+        assert len(self.normalized_shape) == 1
+        bs, l, emb_dim = input.shape
+        if embedding_c is not None:
+            _cond = (embedding_c > 1e-7)
+            c_surv = embedding_c[_cond]
+            c_sum = torch.sum(c_surv)
+            x = input[:,:,_cond]
+
+            mu = (torch.sum(x, dim = -1) / c_sum).view(bs, l, 1)
+            x_orig = (x*1/c_surv)
+
+            _sum = torch.sum( ((x_orig - mu) ** 2) * c_surv, dim=-1)
+            sigma = (torch.sqrt(_sum / c_sum)).view(bs, l, 1)    
+        else:
+            mu = (torch.sum(input, dim = -1) / emb_dim).view(bs, l, 1)
+            _sum = torch.sum((input - mu) ** 2, dim=-1)  # + (mu**2).squeeze(2) * (self.numel-emb_dim) 
+            sigma = (torch.sqrt(_sum / emb_dim)).view(bs, l, 1)    
         
         norm_emb = (input - mu) / (sigma + self.eps)
         return norm_emb * self.weight + self.bias
-    
+    """
+
     def extra_repr(self, ) -> str:
         return '{normalized_shape}, eps={eps}, '\
                 'elementwise_affine={elementwise_affine}'.format(**self.__dict__)
