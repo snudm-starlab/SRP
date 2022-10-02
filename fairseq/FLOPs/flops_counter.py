@@ -30,21 +30,19 @@ class FLOPS_COUNTER:
         self.tar_dict_size = tar_dict_size
 
     # FLOPs for sub-layers
-    def get_attn_flops(self, qk, vo):
+    def get_attn_flops(self, qk, vo, _s, compute_kv=True):
         # emb, qk, vo: dimensions
         attn_flops = dict(
             # projection
-            qk_proj = 2 * 2 * self.emb * qk,
-            qk_bias = 2 * qk,
-            v_proj = 2 * self.emb * vo,
-            v_bias = vo,
+            q_proj = 2 * self.emb * qk,
+            q_bias = qk,
 
             # attention
-            attn_scores = 2 * qk * self.s,
-            attn_softmax = SOFTMAX_FLOPS * self.s * self.heads,
-            attn_dropout = DROPOUT_FLOPS * self.s * self.heads,
-            attn_scale = self.s * self.heads,
-            attn_weight_avg_values = 2 * self.emb * self.s,
+            attn_scores = 2 * qk * _s,
+            attn_softmax = SOFTMAX_FLOPS * _s * self.heads,
+            attn_dropout = DROPOUT_FLOPS * _s * self.heads,
+            attn_scale = _s * self.heads,
+            attn_weight_avg_values = 2 * self.emb * _s,
             # attn_output projection
             attn_output = 2 * self.emb * self.emb,
             attn_output_bias = self.emb,
@@ -54,9 +52,17 @@ class FLOPS_COUNTER:
             # Layer norm
             layer_norm = LAYER_NORM_FLOPS
         )
-        return sum(attn_flops.values()) * self.s
+        kv_flops = dict(
+            k_proj = 2 * self.emb * qk,
+            k_bias = qk,
+            v_proj = 2 * self.emb * vo,
+            v_bias = vo,
+            )
+        if compute_kv:
+            attn_flops.update(kv_flops)
+        return sum(attn_flops.values()) * _s
 
-    def get_fc_flops(self, fc):
+    def get_fc_flops(self, fc, _s):
         # fc: intermediate dimension
         fc_flops = dict(
             # first fc layer
@@ -73,19 +79,22 @@ class FLOPS_COUNTER:
             output_layer_norm = LAYER_NORM_FLOPS * self.emb,
         )
 
-        return sum(fc_flops.values()) * self.s
+        return sum(fc_flops.values()) * _s
 
     # FLOPs for a single layer
     def get_layer_flops(self, self_qk=None, self_vo=None, 
                         encoder_qk=None, encoder_vo=None, 
-                        fc=None):
+                        fc=None, sequence_length=-1):
+        if sequence_length == -1:
+            sequence_length = self.s
+
         layer_flops = {}
         layer_flops['self_attn'] = self.get_attn_flops(
-                                    self_qk, self_vo)
+                                    self_qk, self_vo, sequence_length)
         if encoder_qk and encoder_vo:                            
-            layer_flops['self_attn'] = self.get_attn_flops(
-                                        self_qk, self_vo)
-        layer_flops['fc'] = self.get_fc_flops(fc)
+            layer_flops['encoder_attn'] = self.get_attn_flops(
+                                        self_qk, self_vo, sequence_length)
+        layer_flops['fc'] = self.get_fc_flops(fc, sequence_length)
         return sum(layer_flops.values())
 
     def get_encoder_flops(self, self_qks, self_vos, fcs):
@@ -97,14 +106,18 @@ class FLOPS_COUNTER:
         return _tot
 
     def get_decoder_flops(self, self_qks, self_vos, 
-                                encoder_qks, encoder_vos, fcs):
+                                encoder_qks, encoder_vos, fcs,
+                                sequence_length):
         _tot = 0
-        for i in range(len(self_qks)):
-            _tot += self.get_layer_flops(self_qk=self_qks[i],
-                                         self_vo=self_vos[i],
-                                         encoder_qk=encoder_qks[i],
-                                         encoder_vo=encoder_vos[i],
-                                         fc=fcs[i])
+        for sl in range(1, sequence_length+1):
+            for i in range(len(self_qks)):
+                _tot += self.get_layer_flops(self_qk=self_qks[i],
+                                            self_vo=self_vos[i],
+                                            encoder_qk=encoder_qks[i],
+                                            encoder_vo=encoder_vos[i],
+                                            fc=fcs[i],
+                                            sequence_length=sequence_length
+                                            )
         return _tot
 
     def get_classification_flops(self,):
@@ -122,61 +135,66 @@ class FLOPS_COUNTER:
                                          self.de_self_vos,
                                          self.de_encoder_qks,
                                          self.de_encoder_vos,
-                                         self.de_fcs)
+                                         self.de_fcs,
+                                         sequence_length= self.s)
         cls_flops = self.get_classification_flops()
         return en_flops + de_flops + cls_flops
 
+s = 50
 FLOPs1 = []
-for s in range(1, 128):
-    emb, heads = 512, 4
-    en_self_qks = [512] * 6
-    en_self_vos = [512] * 6
-    en_fcs = [1024] * 6
+emb, heads = 512, 4
+en_self_qks = [512] * 6
+en_self_vos = [512] * 6
+en_fcs = [1024] * 6
 
 
-    de_self_qks = [512] * 6
-    de_self_vos = [512] * 6
-    de_encoder_qks = [512] * 6
-    de_encoder_vos = [512] * 6
-    de_fcs = [1024] * 6
-    tar_dict_size = 6632
-                
-    fc1 = FLOPS_COUNTER(s, emb, heads,
-                en_self_qks, en_self_vos, en_fcs,
-                de_self_qks, de_self_vos, de_fcs,
-                de_encoder_qks, de_encoder_vos,
-                tar_dict_size)
-    flops1 = fc1.get_model_flops()
-    FLOPs1.append(flops1)
+de_self_qks = [512] * 6
+de_self_vos = [512] * 6
+de_encoder_qks = [512] * 6
+de_encoder_vos = [512] * 6
+de_fcs = [1024] * 6
+tar_dict_size = 6632
+            
+fc1 = FLOPS_COUNTER(s, emb, heads,
+            en_self_qks, en_self_vos, en_fcs,
+            de_self_qks, de_self_vos, de_fcs,
+            de_encoder_qks, de_encoder_vos,
+            tar_dict_size)
+flops1 = fc1.get_model_flops()
+FLOPs1.append(flops1)
 f1 = sum(FLOPs1) / 1e9
+# print(f1)
+
 
 FLOPs2 = []
-for s in range(1, 128):
-    emb, heads = 200, 4
-    en_self_qks = [200] * 6
-    en_self_vos = [200] * 6
-    en_fcs = [380] * 6
+emb, heads = 198, 4
+en_self_qkis = [156,236,224,132,160,156]
+en_self_vos = [268,272,248,180,192,184]
+en_fcs = [324,333,311,340,293,484]
 
 
-    de_self_qks = [200] * 6
-    de_self_vos = [200] * 6
-    de_encoder_qks = [200] * 6
-    de_encoder_vos = [200] * 6
-    de_fcs = [380] * 6
-    tar_dict_size = 6632
-                
-    fc2 = FLOPS_COUNTER(s, emb, heads,
-                en_self_qks, en_self_vos, en_fcs,
-                de_self_qks, de_self_vos, de_fcs,
-                de_encoder_qks, de_encoder_vos,
-                tar_dict_size)
-    flops2 = fc2.get_model_flops()
-    FLOPs2.append(flops2)
+de_self_qks = [372,188,196,196,244,356]
+de_self_vos = [320,208,168,180,192,196]
+de_encoder_qks = [236,224,128,152,124,104]
+de_encoder_vos = [268,236,140,188,92,52]
+de_fcs = [335,299,446,473,481,566]
+tar_dict_size = 6632
+            
+fc2 = FLOPS_COUNTER(s, emb, heads,
+            en_self_qks, en_self_vos, en_fcs,
+            de_self_qks, de_self_vos, de_fcs,
+            de_encoder_qks, de_encoder_vos,
+            tar_dict_size)
+flops2 = fc2.get_model_flops()
+FLOPs2.append(flops2)
 f2 = sum(FLOPs2) / 1e9
 print("* FLOPs")
 print(f"- Base model: {f1:.2f}G")
 print(f"- Comp. model: {f2:.2f}G")
 print(f"- Comp. rate: {f2/f1*100:.2f}%")
+
+
+
 
 
 """
