@@ -288,6 +288,15 @@ class CommonConfig(FairseqDataclass):
         },
     )
 
+    decreasing: str = field(
+        default='ea',
+        metadata={
+            "help": "Decreasing type for c. " + \
+                    "(ea) epochwise arithmetic | (eg) epochwise geometric | " + \
+                    "(sa) stepwise arithmetic | (sg) stepwise geometric"
+        },
+    )
+
     warming_up: int = field(
         default=0,
         metadata={
