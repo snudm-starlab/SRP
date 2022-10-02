@@ -993,10 +993,10 @@ class Trainer(object):
             #### Perform optimizer step
             if not scoring:
                 ############### Freeze selected paramters ####################
-                """
+                
                 if self.model.phase == 'pruning':
                     self.optimizer._optimizer.remove_grads(_model=self.model)
-                """
+                
                 ##############################################################
                 with torch.autograd.profiler.record_function("optimizer"):
                     # take an optimization step
