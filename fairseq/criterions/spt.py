@@ -31,7 +31,7 @@ class SPTConfig(FairseqDataclass):
     
     sentence_avg: bool = II("optimization.sentence_avg")
 
-    # For SPT
+    ###########33######################### For SPT #######################################
     local_qk_gl: float = field(
         default=0.3,
         metadata={"help": "coefficient for local group lasso regularization for attns_qk"},
@@ -50,10 +50,10 @@ class SPTConfig(FairseqDataclass):
     )
 
     reg: float = field(
-        default=10,
+        default=0.,
         metadata={"help": "coefficient for l2 regularization"},
     )
-
+    ##########################################################################################
 
 def label_smoothed_nll_loss(lprobs, target, epsilon, ignore_index=None, reduce=True):
     if target.dim() == lprobs.dim() - 1:
