@@ -59,8 +59,7 @@ class SPTEncoderBase(FairseqEncoder):
 
         embed_dim = embed_tokens.embedding_dim
         ################ For SPT ####################
-        self.alpha_init = 1.
-        self.alpha = nn.Parameter(torch.ones(embed_dim) * self.alpha_init)
+        # self.alpha = nn.Parameter(torch.ones(embed_dim))
         self.embedding_c = nn.Parameter(torch.ones(embed_dim)
                                        , requires_grad=True)
         #############################################
@@ -225,7 +224,7 @@ class SPTEncoderBase(FairseqEncoder):
 
         x, encoder_embedding = self.forward_embedding(src_tokens, token_embeddings, 
                                 pos_emb_mask = pos_emb_mask)
-        x *= (self.alpha / self.alpha_init)
+        # x *= self.alpha
         
         ############## For SPT #######################
         if compute_c:
@@ -245,11 +244,10 @@ class SPTEncoderBase(FairseqEncoder):
         if return_all_hiddens:
             encoder_states.append(x)
         # encoder layers
-        prev_ln_c = self.embedding_c
         for layer in self.layers:
             lr = layer(
                 x, encoder_padding_mask=encoder_padding_mask if has_pads else None,
-                compute_c=compute_c, prev_ln_c = prev_ln_c,
+                compute_c=compute_c, embedding_c = self.embedding_c,
             )
             
             if isinstance(lr, tuple) and len(lr) == 2:
@@ -262,7 +260,6 @@ class SPTEncoderBase(FairseqEncoder):
                 assert encoder_states is not None
                 encoder_states.append(x)
                 fc_results.append(fc_result)
-            prev_ln_c = layer.fc_ln_c
 
         if self.layer_norm is not None:
             x = self.layer_norm(x)

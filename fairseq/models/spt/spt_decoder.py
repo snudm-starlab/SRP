@@ -72,8 +72,6 @@ class SPTDecoderBase(FairseqIncrementalDecoder):
         embed_dim = cfg.decoder.embed_dim
 
         #################### For SPT ######################
-        self.alpha_init = 1.
-        self.alpha = nn.Parameter(torch.ones(embed_dim) * self.alpha_init)
         self.embedding_c = nn.Parameter(torch.ones(embed_dim),
                                      requires_grad=True)
         ###################################################
@@ -341,7 +339,6 @@ class SPTDecoderBase(FairseqIncrementalDecoder):
         if self.layernorm_embedding is not None:
             x = self.layernorm_embedding(x)
 
-        x *= (self.alpha / self.alpha_init)
 
         x = self.dropout_module(x)
 
@@ -377,13 +374,12 @@ class SPTDecoderBase(FairseqIncrementalDecoder):
                 self_attn_padding_mask=self_attn_padding_mask,
                 need_attn=bool((idx == alignment_layer)),
                 need_head_weights=bool((idx == alignment_layer)),
-                prev_ln_c=prev_ln_c,
+                embedding_c=self.embedding_c,
                 compute_c=compute_c,
             )
             inner_states.append(x)
             if layer_attn is not None and idx == alignment_layer:
                 attn = layer_attn.float().to(x)
-            prev_ln_c = layer.fc_ln_c
 
         if attn is not None:
             if alignment_heads is not None:

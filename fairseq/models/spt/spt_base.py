@@ -294,27 +294,37 @@ class SPTModelBase(FairseqEncoderDecoderModel):
                             continue
     '''
     @torch.no_grad()
-    def decrease_c(self, ratio):
+    def decrease_c(self, _ratio=None):
         pm = self.pruning_manager
         pd = pm.pruning_dict
+
+        ratio = _ratio if _ratio else pm.c_shrink_rate
+        dec = pm._decreasing 
         
-        _N = 'encoder.layers.0.fc_c'
+        # _N = 'encoder.layers.0.fc_c'
+        """
+        _N = 'decoder.layers.5.encoder_attn_vo_c'
         print("+++"*25)
         print("** Ratio: ", ratio)
         print("** Before shrinking")
         print(recursive_get_param(self, _N))
+        """
 
-        
         for _n in pd.keys():
             _indices = pd[_n]
             _p = recursive_get_param(self, _n)
-            # Difference
-            _p[_indices] = _p[_indices] - ratio
-            # Multiplication
-            # _p[_indices] = _p[_indices] * ratio
+            if dec[1] == 'a':
+                # Arithmetic
+                _p[_indices] = _p[_indices] - ratio
+            elif dec[1] == 'g':
+                # Geometric
+                _p[_indices] = _p[_indices] * ratio
+            else:
+                raise Exception('Not an identified decreasing type')
+        """
         print("** After shrinking")
         print(recursive_get_param(self, _N))
-
+        """
 
     @torch.no_grad()
     def pruning(self,):
@@ -335,16 +345,6 @@ class SPTModelBase(FairseqEncoderDecoderModel):
                 mask = get_pruning_mask(_p.shape, _indices) # its name is its key
                 set_param(self, _n, nn.Parameter(_p.data[mask]))
                 continue  
-            elif '_indices' in _n:
-                set_param(self, _n, nn.Parameter(_p.data, requires_grad=False))
-                continue
-
-            elif 'alpha' in _n: 
-                ende = _n.split('.')[0]
-                _key = f"{ende}.embedding_c"
-                mask = get_pruning_mask(_p.shape[0], pd[_key])
-                set_param(self, _n, nn.Parameter(_p.data[mask]))
-
             elif 'embed_tokens' in _n:
                 ende = _n.split('.')[0]
                 _key = f"{ende}.embedding_c"
@@ -352,18 +352,13 @@ class SPTModelBase(FairseqEncoderDecoderModel):
                 set_param(self, _n, nn.Parameter(_p.data[:, mask]))
                 if 'decoder.embed_tokens' in _n:
                     self.decoder.output_projection.weight = self.decoder.embed_tokens.weight
+
             elif 'output_projection' in _n:
                 continue
  
             elif 'layer_norm' in _n:
                 ende, ly, type, wb = _parsing(_n)
-                if 'self' in type:
-                    _type = 'self_attn'
-                elif 'encoder' in type:
-                    _type = 'encoder_attn'
-                else:
-                    _type = 'fc'
-                _key = f"{ende}.layers.{ly}.{_type}_ln_c"
+                _key = f"{ende}.embedding_c"
                 _indices = pd[_key] if _key in pd else []
                 mask = get_pruning_mask(_p.shape[0], _indices)
                 set_param(self, _n, nn.Parameter(_p.data[mask]))
@@ -375,11 +370,7 @@ class SPTModelBase(FairseqEncoderDecoderModel):
                 ende, ly, type, wb = _parsing(_n)
 
                 # Get global and local masks
-                if ende == 'encoder':
-                    global_key = f'{ende}.layers.{ly}.self_attn_ln_c'
-                else:
-                    # decoder
-                    global_key = f'{ende}.layers.{ly}.encoder_attn_ln_c'
+                global_key = f'{ende}.embedding_c'
                 local_key = f'{ende}.layers.{ly}.fc_c'
 
                 global_indices = pd[global_key] if global_key in pd else []
@@ -413,17 +404,18 @@ class SPTModelBase(FairseqEncoderDecoderModel):
                 ende, ly, type, wb = _parsing(_n)
                 # Get global and local masks
                 if 'self_attn' in _n:
-                    if ly == '0':
-                        global_key = f'{ende}.embedding_c'
-                    else:
-                        global_key = f'{ende}.layers.{int(ly)-1}.fc_ln_c'
+                    global_key = f'{ende}.embedding_c'
                     if 'q_proj' in _n or 'k_proj' in _n:
                         local_key = f'{ende}.layers.{ly}.self_attn_qk_c'
                     else:
                         local_key = f'{ende}.layers.{ly}.self_attn_vo_c'
                 else:
                     # encoder_attn
-                    global_key = f'{ende}.layers.{ly}.self_attn_ln_c'
+                    if 'k_proj' in _n or 'v_proj' in _n:
+                        global_key = f'encoder.embedding_c'
+                    else:
+                        global_key = f'decoder.embedding_c'
+                        
                     if 'q_proj' in _n or 'k_proj' in _n:
                         local_key = f'{ende}.layers.{ly}.encoder_attn_qk_c'
                     else:
@@ -435,7 +427,6 @@ class SPTModelBase(FairseqEncoderDecoderModel):
                 global_indices = pd[global_key] if global_key in pd else []
                 local_indices = pd[local_key] if local_key in pd else []
 
-                # Compute loss 
                 if 'out_proj' in _n:
                     if 'bias' in _n:
                         global_mask = get_pruning_mask(_p.shape[0],  global_indices)
@@ -454,11 +445,7 @@ class SPTModelBase(FairseqEncoderDecoderModel):
                         local_mask = get_pruning_mask(_p.shape[0],  local_indices)
                         new_p = _p.data[local_mask, :][:, global_mask]
                         set_param(self, _n, nn.Parameter(new_p.data))
-        """
-        print("AFTER Pruning ___________________")
-        for _n, _p in self.named_parameters():
-            print("**", _n, _p.shape)
-        """
+    
     def get_num_groups(self,):
         param_dict = self.state_dict()
         num_groups = []
