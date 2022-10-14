@@ -556,10 +556,16 @@ class PruningManager():
         self.GLD = cfg.model.decoder_embed_dim
         self.FC = cfg.model.encoder_ffn_embed_dim * self.en_layers \
                 + cfg.model.decoder_ffn_embed_dim * self.de_layers
+        # Assume that emb_encdoer == emb_decoder
+        self.QK = cfg.model.encoder_embed_dim // self.en_heads
+        self.VO = cfg.model.encoder_embed_dim // self.de_heads
+        
+        """
         self.QK = cfg.model.encoder_embed_dim // self.en_heads * self.en_layers \
                 + cfg.model.decoder_embed_dim // self.de_heads * self.de_layers * 2 
         self.VO = cfg.model.encoder_embed_dim // self.en_heads * self.en_layers \
                 + cfg.model.decoder_embed_dim // self.de_heads * self.de_layers * 2 
+        """
 
         self.count = 0
         self._count = 0
@@ -603,7 +609,12 @@ class PruningManager():
         assert self.GLE == self.GLD # For simplify computation of n1
         assert self.en_heads == self.de_heads
 
-        n1 = float(self.GLE * (self.FC * 2 + self.QK * self.en_heads * 2 + self.VO * self.en_heads * 2))
+        _QK = self.GLE // self.en_heads * self.en_layers \
+                + self.GLD // self.de_heads * self.de_layers * 2 
+        _VO = self.GLE // self.en_heads * self.en_layers \
+                + self.GLD // self.de_heads * self.de_layers * 2 
+
+        n1 = float(self.GLE * (self.FC * 2 + _QK * self.en_heads * 2 + _VO * self.en_heads * 2))
         n2 = float(self.src_words * self.GLE + self.tar_words * self.GLD
             + self.GLE * 2 * (2*self.en_layers + 3*self.de_layers) # layer_norm
             + self.QK * self.en_heads * 2 
@@ -740,7 +751,37 @@ def get_global_dict(model, gl, ende):
     return gl_dict
 """
 
+def get_qkvo_dict(model, pn, qkvo):
+    pruning_dict = {} # k:v = param_name: pruning indices
+    # score_dict = {} # k:v = param_name: score, args_list
+    # scores = []
+    for ende in ["encoder", "decoder"]:
+        module_list = ["self_attn"]
+        if ende == "decoder":
+            module_list.append("encoder_attn")
+        for ly in range(6):
+            for module in module_list:
+                _n = f"{ende}.layers.{ly}.{module}_{qkvo}_c"
+                _grad = get_attr(model, _n).grad
+                if _grad is None:
+                    continue
 
+                _head_dim = _grad.shape[-1]//4
+                # print(f"### _grad shape: {_grad.shape[0]} | _head_dim: {_head_dim}")
+                args_list = []
+                for i in range(4):
+                    temp_grad, _args = torch.sort(_grad[_head_dim*i:_head_dim*(i+1)], descending=True)
+
+                    # print(f"**** {i}: ", temp_grad.shape, _head_dim)
+                    _args += _head_dim * i
+                    args_list.append(_args[:pn])
+                # score_dict[_n] = [score, args_list]
+                _inds_all = torch.cat(args_list)
+                pruning_dict[_n] = _inds_all
+
+    return pruning_dict     
+
+"""
 def get_qkvo_dict(model, pn, qkvo):
     pruning_dict = {} # k:v = param_name: pruning indices
     score_dict = {} # k:v = param_name: score, args_list
@@ -795,7 +836,7 @@ def get_qkvo_dict(model, pn, qkvo):
                         pruning_dict[_n] = _inds_all
     # print("Count: ", count)
     return pruning_dict     
-
+"""
 
 def get_fc_dict(model, fc):
     fc_dict = {} # k:v = param_name: pruning indices
