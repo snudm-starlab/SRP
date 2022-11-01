@@ -14,6 +14,7 @@ import os
 import sys
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+print("HELLO")
 # We need to setup root logger before importing any fairseq libraries.
 logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
