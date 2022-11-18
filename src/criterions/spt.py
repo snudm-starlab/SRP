@@ -11,6 +11,8 @@ from fairseq import metrics, utils
 from fairseq.criterions import FairseqCriterion, register_criterion
 from fairseq.dataclass import FairseqDataclass
 from omegaconf import II
+import torch.nn as nn
+import torch.nn.functional as F
 
 
 @dataclass
@@ -28,7 +30,6 @@ class SPTCriterionConfig(FairseqDataclass):
         metadata={"help": "Ignore first N tokens"},
     )
     sentence_avg: bool = II("optimization.sentence_avg")
-
 
 def label_smoothed_nll_loss(lprobs, target, epsilon, ignore_index=None, reduce=True):
     if target.dim() == lprobs.dim() - 1:
@@ -68,7 +69,13 @@ class SPTCriterion(FairseqCriterion):
         self.ignore_prefix_size = ignore_prefix_size
         self.report_accuracy = report_accuracy
 
-    def forward(self, model, sample, reduce=True):
+    def prob_kd_loss(self, student_logits, teacher_logits, T, reduction_kd='sum'):
+        
+        kd_loss = nn.KLDivLoss(reduction='sum')(F.log_softmax(student_logits/T, dim=-1),
+                                                F.softmax(teacher_logits/T, dim=-1)) * T * T
+        return kd_loss
+
+    def forward(self, model, sample, reduce=True, teacher_model=None):
         """Compute the loss for the given sample.
 
         Returns a tuple with three elements:
@@ -76,11 +83,44 @@ class SPTCriterion(FairseqCriterion):
         2) the sample size, which is used as the denominator for the gradient
         3) logging outputs to display while training
         """
-        net_output = model(**sample["net_input"])
+        if teacher_model is not None:
+            sample["net_input"]["use_kd"] = True
+            with torch.no_grad():
+                teacher_output, teacher_states = teacher_model(**sample["net_input"])
+            net_output, student_states = model(**sample["net_input"])
+        else:
+            sample["net_input"]["use_kd"] = False
+            net_output = model(**sample["net_input"])
+
         loss, nll_loss = self.compute_loss(model, net_output, sample, reduce=reduce)
         sample_size = (
             sample["target"].size(0) if self.sentence_avg else sample["ntokens"]
         )
+
+        if teacher_model is not None:
+            """
+            # Attention KD
+            attn_kd_loss = torch.zeros_like(loss)
+            for l in range(model.cfg.encoder_layers):
+                for attn_name in ['encoder.self_attn', 
+                                  'decoder.self_attn', 
+                                  'decoder.encoder_attn']:
+                    ts = teacher_states[f"{attn_name}.{l}"]
+                    ss = student_states[f"{attn_name}.{l}"]
+                    attn_ks_loss = attn_kd_loss + torch.mean((ts-ss) **2 )
+
+            loss += attn_kd_loss * model.cfg.attn_kd
+            """
+            # print("********* T: ", model.cfg.T)
+            # print("********* teacher_logits: ", teacher_output[0].shape)
+            # print("********* student_logtis: ", net_output[0].shape)
+            prob_kd = self.prob_kd_loss(student_logits=net_output[0], 
+                                        teacher_logits=teacher_output[0],
+                                        T=model.cfg.T)
+            # print(f"*** prob_kd: {prob_kd.item()} | loss: {loss.item()} | nll: {nll_loss.item()}")  
+            # loss = loss * (1-model.cfg.prob_kd) + prob_kd * (model.cfg.prob_kd)
+            loss = loss + prob_kd * (model.cfg.prob_kd)
+            # loss = loss * 0. + prob_kd
         logging_output = {
             "loss": loss.data,
             "nll_loss": nll_loss.data,

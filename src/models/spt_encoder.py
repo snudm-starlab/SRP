@@ -100,11 +100,13 @@ class SPTEncoderBase(FairseqEncoder):
             [self.build_encoder_layer(cfg) for i in range(cfg.encoder.layers)]
         )
         self.num_layers = len(self.layers)
-
+        """
+        # TODO: Delete 
         if cfg.encoder.normalize_before:
             self.layer_norm = LayerNorm(embed_dim, export=cfg.export)
         else:
             self.layer_norm = None
+        """
 
     def build_encoder_layer(self, cfg):
         layer = spt_layer.SPTEncoderLayerBase(
@@ -143,6 +145,7 @@ class SPTEncoderBase(FairseqEncoder):
         return_all_hiddens: bool = False,
         token_embeddings: Optional[torch.Tensor] = None,
         compute_c=False,
+        use_kd=False,
     ):
         """
         Args:
@@ -169,7 +172,7 @@ class SPTEncoderBase(FairseqEncoder):
         """
         return self.forward_scriptable(
             src_tokens, src_lengths, return_all_hiddens, token_embeddings,
-            compute_c=compute_c
+            compute_c=compute_c, use_kd=use_kd
         )
 
     # TorchScript doesn't support super() method so that the scriptable Subclass
@@ -183,6 +186,7 @@ class SPTEncoderBase(FairseqEncoder):
         return_all_hiddens: bool = False,
         token_embeddings: Optional[torch.Tensor] = None,
         compute_c=False,
+        use_kd=False,
     ):
         """
         Args:
@@ -232,11 +236,20 @@ class SPTEncoderBase(FairseqEncoder):
             encoder_states.append(x)
 
         # encoder layers
-        for layer in self.layers:
-            lr = layer(
-                x, encoder_padding_mask=encoder_padding_mask if has_pads else None,
-                compute_c=compute_c, embedding_c=self.embedding_c,
-            )
+        hidden_states = {}
+        for idx, layer in enumerate(self.layers):
+            if not use_kd:
+                lr = layer(
+                    x, encoder_padding_mask=encoder_padding_mask if has_pads else None,
+                    compute_c=compute_c, embedding_c=self.embedding_c, use_kd=False,
+                    )
+            else:
+                lr, hs = layer(
+                    x, encoder_padding_mask=encoder_padding_mask if has_pads else None,
+                    compute_c=compute_c, embedding_c=self.embedding_c, use_kd=use_kd,
+                    )
+                hidden_states[f'encoder.self_attn.{idx}'] = hs['self_attn']
+                hidden_states[f'encoder.fc.{idx}'] = hs['fc']
 
             if isinstance(lr, tuple) and len(lr) == 2:
                 x, fc_result = lr
@@ -249,8 +262,11 @@ class SPTEncoderBase(FairseqEncoder):
                 encoder_states.append(x)
                 fc_results.append(fc_result)
 
+        """
+        # TODO: delete
         if self.layer_norm is not None:
             x = self.layer_norm(x)
+        """
 
         # The Pytorch Mobile lite interpreter does not supports returning NamedTuple in
         # `forward` so we use a dictionary instead.
@@ -262,6 +278,7 @@ class SPTEncoderBase(FairseqEncoder):
             .reshape(-1, 1)
             .contiguous()
         )
+
         return {
             "encoder_out": [x],  # T x B x C
             "encoder_padding_mask": [encoder_padding_mask],  # B x T
@@ -270,7 +287,31 @@ class SPTEncoderBase(FairseqEncoder):
             "fc_results": fc_results,  # List[T x B x C]
             "src_tokens": [],
             "src_lengths": [src_lengths],
+            "hidden_states": hidden_states
         }
+
+    def forward_torchscript(self, net_input: Dict[str, Tensor], compute_c=None):
+        """A TorchScript-compatible version of forward.
+
+        Encoders which use additional arguments may want to override
+        this method for TorchScript compatibility.
+        """
+        if torch.jit.is_scripting():
+            return self.forward(
+                src_tokens=net_input["src_tokens"],
+                src_lengths=net_input["src_lengths"],
+                compute_c=compute_c,
+            )
+        else:
+            return self.forward_non_torchscript(net_input, compute_c=compute_c)
+    
+    @torch.jit.unused
+    def forward_non_torchscript(self, net_input: Dict[str, Tensor], compute_c=None):
+        encoder_input = {
+            k: v for k, v in net_input.items() if k != "prev_output_tokens"
+        }
+        encoder_input["compute_c"] = compute_c
+        return self.forward(**encoder_input)
 
     @torch.jit.export
     def reorder_encoder_out(self, encoder_out: Dict[str, List[Tensor]], new_order):

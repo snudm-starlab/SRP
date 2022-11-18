@@ -102,6 +102,20 @@ def _main(cfg: DictConfig, output_file):
         strict=(cfg.checkpoint.checkpoint_shard_count == 1),
         num_shards=cfg.checkpoint.checkpoint_shard_count,
     )
+    """ 
+    ##################### SRP ########################################
+    num_params = np.sum([p.numel() for p in models[0].parameters() if p.requires_grad])
+    print(f"# Params of SRP model: {num_params / 1e6:.2f}")
+
+    named_params = dict(models[0].named_parameters())
+    print(named_params['encoder.embedding_c'])
+    print(named_params['decoder.embedding_c'])
+
+    import time
+    time.sleep(1000)
+    ##################################################################
+    """
+    
 
     # loading the dataset should happen after the checkpoint has been loaded so we can give it the saved task config
     task.load_dataset(cfg.dataset.gen_subset, task_cfg=saved_cfg.task)

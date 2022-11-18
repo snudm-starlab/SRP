@@ -54,6 +54,10 @@ class Trainer(object):
         self.cfg = cfg
         self.task = task
 
+        ######################## For SRP ###################################
+        self.teacher_model = None
+        ####################################################################
+
         # catalog shared parameters
         shared_params = _catalog_shared_params(model)
         self.tpu = cfg.common.tpu
@@ -840,6 +844,7 @@ class Trainer(object):
                         update_num=self.get_num_updates(),
                         ignore_grad=is_dummy_batch,
                         scoring=scoring,
+                        teacher_model=self.teacher_model,
                         **extra_kwargs,
                     )
                     del loss
@@ -961,10 +966,10 @@ class Trainer(object):
             #################### Performing optimizer step ########################
             if not scoring:
                 ############### Freeze selected paramters ########################
-                """                
+                         
                 if self.model.phase == 'pruning':
                     self.optimizer._optimizer.remove_grads(_model=self.model)
-                """                
+                                
                 ##############################################################
                 with torch.autograd.profiler.record_function("optimizer"):
                     # take an optimization step

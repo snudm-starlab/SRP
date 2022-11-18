@@ -253,20 +253,29 @@ class Adam(torch.optim.Optimizer):
         for _n, _p in _model.named_parameters():
             if _n[-2:] == "_c":
                 continue
+            if not _p.requires_grad:
+                continue
             param_list.append(_p)
             param_names.append(_n)
             
-
         def get_pruning_mask(max_len, pruning_indices):
             _mask = torch.ones(max_len).bool()
             _mask[pruning_indices] = False
             return _mask
 
-        _i = 0
+        _i = -1
         for _k, _v in self.state.items():
+            _i += 1
             _n = param_names[_i]
             _p = param_list[_i]
-            
+            """
+            print('===================')
+            print(_n) 
+            print(_p.shape)
+            print(_v['exp_avg'].shape)
+            print('===================')
+            """
+
             if not _p.requires_grad:
                 continue
 
@@ -281,6 +290,7 @@ class Adam(torch.optim.Optimizer):
                 _p.grad[:,_indices] = 0.
                 _v['exp_avg'][:,_indices] = 0.
                 _v['exp_avg_sq'][:,_indices] = 0.
+
             elif 'output_projection' in _n:
                 continue
 
@@ -304,7 +314,7 @@ class Adam(torch.optim.Optimizer):
 
                 global_indices = pd[global_key] if global_key in pd else []
                 local_indices = pd[local_key] if local_key in pd else []
-
+                
                 if 'fc2' in _n:
                     if 'bias' in _n:
                         _p.grad[global_indices] = 0.
@@ -394,8 +404,6 @@ class Adam(torch.optim.Optimizer):
                         _v['exp_avg_sq'][:,global_indices] = 0.
                         _v['exp_avg_sq'][local_indices,:] = 0.
 
-            # _dict[param_list[_i]] = _v
-            _i+=1
         # self.state = _dict
         
 

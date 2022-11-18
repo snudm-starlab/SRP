@@ -15,7 +15,7 @@ from fairseq import utils
 from fairseq.incremental_decoding_utils import with_incremental_state
 from fairseq.modules.fairseq_dropout import FairseqDropout
 from fairseq.modules.quant_noise import quant_noise
-
+import copy
 
 @with_incremental_state
 class MultiheadAttention(nn.Module):
@@ -310,6 +310,7 @@ class MultiheadAttention(nn.Module):
         need_head_weights: bool = False,
         qk_c = None,
         vo_c = None,
+        return_A = False,
         
     ) -> Tuple[Tensor, Optional[Tensor]]:
         """Input shape: Time x Batch x Channel
@@ -540,6 +541,10 @@ class MultiheadAttention(nn.Module):
             if before_softmax:
                 return attn_weights, v
 
+            if return_A:
+                # A = copy.deepcopy(attn_weights)
+                A = attn_weights.clone()
+
             attn_weights_float = utils.softmax(
                 attn_weights, dim=-1, onnx_trace=self.onnx_trace
             )
@@ -585,6 +590,9 @@ class MultiheadAttention(nn.Module):
                 .transpose(0, 1)
             )
             attn_weights = torch.ones(bsz * self.num_heads, tgt_len, src_len)
+            if return_A:
+                # A = copy.deepcopy(attn_weights)
+                A = attn_weights.clone()
             attn_weights = attn_weights.to(f'cuda:{v.get_device()}')
             attn_weights_float = utils.softmax(
                 attn_weights, dim=-1, onnx_trace=self.onnx_trace
@@ -653,7 +661,10 @@ class MultiheadAttention(nn.Module):
                 # average attention weights over heads
                 attn_weights = attn_weights.mean(dim=0)
 
-        return attn, attn_weights
+        if return_A:
+            return attn, attn_weights, A
+        else:
+            return attn, attn_weights
 
     @staticmethod
     def _append_prev_key_padding_mask(

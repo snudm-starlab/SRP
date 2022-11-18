@@ -41,14 +41,30 @@ class CustomLayerNorm(nn.Module):
             init.ones_(self.weight)
             init.zeros_(self.bias)
     
-    def forward(self, input: Tensor, embedding_c = None) -> Tensor:
+    def forward(self, x: Tensor, embedding_c = None, weighted=False) -> Tensor:
         assert len(self.normalized_shape) == 1
-        bs, l, emb_dim = input.shape
-        mu = (torch.sum(input, dim = -1) / self.numel).view(bs, l, 1)
-        _sum = torch.sum((input - mu) ** 2, dim=-1) + (mu**2).squeeze(2) * (self.numel-emb_dim) 
-        sigma = (torch.sqrt(_sum / self.numel)).view(bs, l, 1)    
-    
-        norm_emb = (input - mu) / (sigma + self.eps)
+        if weighted:
+            if embedding_c is not None:
+                bs, l, emb_dim = x.shape
+                mu = (torch.sum(x * embedding_c, dim=-1) / torch.sum(embedding_c)).view(bs, l, 1)
+                _sum = torch.sum(((x-mu) ** 2) * embedding_c, dim=-1)
+                sigma = torch.sqrt(_sum / torch.sum(embedding_c)).view(bs, l, 1)
+            else:
+                bs, l, emb_dim = x.shape
+                mu = (torch.sum(x, dim=-1) / emb_dim).view(bs, l, 1)
+                _sum = torch.sum(((x-mu) ** 2), dim=-1)
+                sigma = torch.sqrt(_sum / emb_dim).view(bs, l, 1)
+
+        else:
+            if embedding_c is not None:
+                x *= embedding_c
+            bs, l, emb_dim = x.shape
+            mu = (torch.sum(x, dim = -1) / self.numel).view(bs, l, 1)
+            _sum = torch.sum((x - mu) ** 2, dim=-1) + (mu**2).squeeze(2) * (self.numel-emb_dim) 
+            sigma = (torch.sqrt(_sum / self.numel)).view(bs, l, 1)    
+
+        
+        norm_emb = (x - mu) / (sigma + self.eps)
         return norm_emb * self.weight + self.bias
 
     """

@@ -44,6 +44,11 @@ class SPTEncoderLayerBase(nn.Module):
         )
         self.activation_fn = utils.get_activation_fn(activation=cfg.activation_fn)
         activation_dropout_p = cfg.activation_dropout
+        ############################ SRP ########################################
+        self.do_weighted = cfg.weighted_layernorm
+        #########################################################################
+
+
         if activation_dropout_p == 0:
             # for backwards compatibility with models that use cfg.relu_dropout
             activation_dropout_p = cfg.relu_dropout or 0
@@ -130,6 +135,7 @@ class SPTEncoderLayerBase(nn.Module):
         attn_mask: Optional[Tensor] = None,
         compute_c = False,
         embedding_c = None,
+        use_kd = False
     ):
         """
         Args:
@@ -146,6 +152,8 @@ class SPTEncoderLayerBase(nn.Module):
         Returns:
             encoded output of shape `(seq_len, batch, embed_dim)`
         """
+        hidden_states = {}
+
         if self.self_attn.v_proj.weight.shape[0] == 0:
             # Skip self-attention
             pass
@@ -166,26 +174,45 @@ class SPTEncoderLayerBase(nn.Module):
             else:
                 qk_c, vo_c = None, None
 
-            x, _ = self.self_attn(
-                query=x,
-                key=x,
-                value=x,
-                key_padding_mask=encoder_padding_mask,
-                need_weights=False,
-                attn_mask=attn_mask,
-                qk_c=qk_c,
-                vo_c=vo_c,
-            )
+            if use_kd:
+                x, _, A = self.self_attn(
+                    query=x,
+                    key=x,
+                    value=x,
+                    key_padding_mask=encoder_padding_mask,
+                    need_weights=False,
+                    attn_mask=attn_mask,
+                    qk_c=qk_c,
+                    vo_c=vo_c,
+                    return_A=True
+                )
+                hidden_states['self_attn'] = A
+
+            else:
+                x, _ = self.self_attn(
+                    query=x,
+                    key=x,
+                    value=x,
+                    key_padding_mask=encoder_padding_mask,
+                    need_weights=False,
+                    attn_mask=attn_mask,
+                    qk_c=qk_c,
+                    vo_c=vo_c,
+                )
+
             x = self.dropout_module(x)
+
             if compute_c:
                 # W_O C_emb
-                x *= embedding_c
+                # x *= embedding_c # fixed: Moved into the layer norm
                 x = self.residual_connection(x, residual)
-                x = self.self_attn_layer_norm(x, embedding_c=embedding_c)
+                x = self.self_attn_layer_norm(x, embedding_c=embedding_c,
+                                             weighted = self.do_weighted)
                 x *= embedding_c
             else:
                 x = self.residual_connection(x, residual)
-                x = self.self_attn_layer_norm(x)
+                x = self.self_attn_layer_norm(x, weighted = self.do_weighted)
+
         if self.fc1.weight.shape[0] == 0:
             # Skip fc layers
             fc_result = x
@@ -194,23 +221,27 @@ class SPTEncoderLayerBase(nn.Module):
             x = self.activation_fn(self.fc1(x))
             x = self.activation_dropout_module(x)
             if compute_c:
-                x *= self.fc_c
+                x = x * self.fc_c
             x = self.fc2(x)
+            hidden_states['fc'] = x
 
             fc_result = x
 
             x = self.dropout_module(x)
             if compute_c:
-                x *= embedding_c 
+                # x *= embedding_c # fixed: Moved into the layer norm
                 x = self.residual_connection(x, residual)
-                x = self.final_layer_norm(x, embedding_c=embedding_c)
+                x = self.final_layer_norm(x, embedding_c=embedding_c,
+                                          weighted = self.do_weighted)
                 x*= embedding_c
             else:
                 x = self.residual_connection(x, residual)
-                x = self.final_layer_norm(x)
+                x = self.final_layer_norm(x, weighted = self.do_weighted)
 
         if self.return_fc and not torch.jit.is_scripting():
             return x, fc_result
+        if use_kd:
+            return x, hidden_states
         return x
 
 
@@ -259,6 +290,9 @@ class SPTDecoderLayerBase(nn.Module):
         self.quant_noise_block_size = cfg.quant_noise.pq_block_size
 
         self.cross_self_attention = cfg.cross_self_attention
+        ############################ SRP ########################################
+        self.do_weighted = cfg.weighted_layernorm
+        #########################################################################
 
         self.self_attn = self.build_self_attention(
             self.embed_dim,
@@ -381,6 +415,7 @@ class SPTDecoderLayerBase(nn.Module):
         need_head_weights: bool = False,
         embedding_c=None,
         compute_c=False,
+        use_kd = False,
     ):
         """
         Args:
@@ -408,6 +443,8 @@ class SPTDecoderLayerBase(nn.Module):
             self_attn_vo_c = None
             encoder_attn_qk_c = None 
             encoder_attn_vo_c = None
+
+        hidden_states = {}
 
         # Masked self-attention start
         if self.self_attn.v_proj.weight.shape[0] == 0:
@@ -450,36 +487,53 @@ class SPTDecoderLayerBase(nn.Module):
                 y = torch.cat((encoder_out, x), dim=0)
             else:
                 y = x
+            if use_kd:
+                x, attn, As = self.self_attn(
+                    query=x,
+                    key=y,
+                    value=y,
+                    key_padding_mask=self_attn_padding_mask,
+                    incremental_state=incremental_state,
+                    need_weights=False,
+                    attn_mask=self_attn_mask,
+                    qk_c=self_attn_qk_c,
+                    vo_c=self_attn_vo_c,
+                    return_A=True,
+                    )
+                hidden_states['self_attn'] = As
+            else:
+                x, attn = self.self_attn(
+                    query=x,
+                    key=y,
+                    value=y,
+                    key_padding_mask=self_attn_padding_mask,
+                    incremental_state=incremental_state,
+                    need_weights=False,
+                    attn_mask=self_attn_mask,
+                    qk_c=self_attn_qk_c,
+                    vo_c=self_attn_vo_c,
+                    )
 
-            x, attn = self.self_attn(
-                query=x,
-                key=y,
-                value=y,
-                key_padding_mask=self_attn_padding_mask,
-                incremental_state=incremental_state,
-                need_weights=False,
-                attn_mask=self_attn_mask,
-                qk_c=self_attn_qk_c,
-                vo_c=self_attn_vo_c,
-                )
             
             if self.c_attn is not None:
                 tgt_len, bsz = x.size(0), x.size(1)
                 x = x.view(tgt_len, bsz, self.nh, self.head_dim)
                 x = torch.einsum("tbhd,h->tbhd", x, self.c_attn)
                 x = x.reshape(tgt_len, bsz, self.embed_dim)
+
             if self.attn_ln is not None:
                 x = self.attn_ln(x) 
 
             x = self.dropout_module(x)
             if compute_c:
-                x *= embedding_c
+                # x *= embedding_c # fixed: Moved into the layer norm
                 x = self.residual_connection(x, residual)
-                x = self.self_attn_layer_norm(x, embedding_c=embedding_c)
+                x = self.self_attn_layer_norm(x, embedding_c=embedding_c,
+                                             weighted = self.do_weighted)
                 x *= embedding_c
             else:
                 x = self.residual_connection(x, residual)
-                x = self.self_attn_layer_norm(x) 
+                x = self.self_attn_layer_norm(x, weighted = self.do_weighted) 
         # Masked self attention end
 
         # Encoder-attention start
@@ -498,28 +552,45 @@ class SPTDecoderLayerBase(nn.Module):
                         saved_state["prev_key_padding_mask"] = prev_attn_state[2]
                     assert incremental_state is not None
                     self.encoder_attn._set_input_buffer(incremental_state, saved_state)
+                if use_kd:
+                    x, attn, Ae = self.encoder_attn(
+                        query=x,
+                        key=encoder_out,
+                        value=encoder_out,
+                        key_padding_mask=encoder_padding_mask,
+                        incremental_state=incremental_state,
+                        static_kv=True,
+                        need_weights=need_attn or (not self.training and self.need_attn),
+                        need_head_weights=need_head_weights,
+                        qk_c=encoder_attn_qk_c,
+                        vo_c=encoder_attn_vo_c,
+                        return_A=True,
+                        )
+                    hidden_states['encoder_attn'] = Ae
+                else:
+                    x, attn = self.encoder_attn(
+                        query=x,
+                        key=encoder_out,
+                        value=encoder_out,
+                        key_padding_mask=encoder_padding_mask,
+                        incremental_state=incremental_state,
+                        static_kv=True,
+                        need_weights=need_attn or (not self.training and self.need_attn),
+                        need_head_weights=need_head_weights,
+                        qk_c=encoder_attn_qk_c,
+                        vo_c=encoder_attn_vo_c,
+                        )
 
-                x, attn = self.encoder_attn(
-                    query=x,
-                    key=encoder_out,
-                    value=encoder_out,
-                    key_padding_mask=encoder_padding_mask,
-                    incremental_state=incremental_state,
-                    static_kv=True,
-                    need_weights=need_attn or (not self.training and self.need_attn),
-                    need_head_weights=need_head_weights,
-                    qk_c=encoder_attn_qk_c,
-                    vo_c=encoder_attn_vo_c,
-                )
                 x = self.dropout_module(x)
                 if compute_c:
-                    x *= embedding_c
+                    # x *= embedding_c # fixed: Moved into the layer norm
                     x = self.residual_connection(x, residual)
-                    x = self.encoder_attn_layer_norm(x, embedding_c=embedding_c)
+                    x = self.encoder_attn_layer_norm(x, embedding_c=embedding_c,
+                                                    weighted = self.do_weighted)
                     x *= embedding_c
                 else:
                     x = self.residual_connection(x, residual)
-                    x = self.encoder_attn_layer_norm(x)
+                    x = self.encoder_attn_layer_norm(x, weighted = self.do_weighted)
         # Encoder-attention ends
 
         # FNN starts
@@ -531,20 +602,22 @@ class SPTDecoderLayerBase(nn.Module):
             x = self.activation_fn(self.fc1(x))
             x = self.activation_dropout_module_fc1(x)
             if compute_c:
-                x *= self.fc_c
+                x = x * self.fc_c
 
             # if self.ffn_layernorm is not None:
             #     x = self.ffn_layernorm(x)
             x = self.fc2(x)
+            hidden_states['fc'] = x
             x = self.dropout_module_fc2(x)
             if compute_c:
-                x *= embedding_c
+                # x *= embedding_c # fixed: Moved into the layer norm
                 x = self.residual_connection(x, residual)
-                x = self.final_layer_norm(x, embedding_c=embedding_c)
+                x = self.final_layer_norm(x, embedding_c=embedding_c,
+                                          weighted = self.do_weighted)
                 x *= embedding_c
             else:
                 x = self.residual_connection(x, residual)
-                x = self.final_layer_norm(x)
+                x = self.final_layer_norm(x, weighted = self.do_weighted)
         # FNN ends
 
         if self.onnx_trace and incremental_state is not None:
@@ -559,6 +632,8 @@ class SPTDecoderLayerBase(nn.Module):
             else:
                 self_attn_state = [saved_state["prev_key"], saved_state["prev_value"]]
             return x, attn, self_attn_state
+        if use_kd:
+            return x, attn, None, hidden_states
         return x, attn, None
         
     def make_generation_fast_(self, need_attn: bool = False, **kwargs):

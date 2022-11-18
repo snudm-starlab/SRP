@@ -12,6 +12,7 @@ import logging
 import math
 import os
 import sys
+import pickle, time, copy
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 # We need to setup root logger before importing any fairseq libraries.
@@ -28,6 +29,7 @@ import torch
 from omegaconf import DictConfig, OmegaConf
 
 import checkpoint_utils
+from flops_counter import FLOPS_COUNTER
 from fairseq import options, quantization_utils, tasks, utils
 from fairseq.data import data_utils, iterators
 from fairseq.data.plasma_utils import PlasmaStore
@@ -40,6 +42,7 @@ from fairseq.file_io import PathManager
 from fairseq.logging import meters, metrics, progress_bar
 from fairseq.model_parallel.megatron_trainer import MegatronTrainer
 from trainer import Trainer
+
 
 
 def main(cfg: FairseqConfig) -> None:
@@ -98,7 +101,8 @@ def main(cfg: FairseqConfig) -> None:
 
     ############# Perform shaping Model for loading Pruned Model #################
     # pass checkpoint path and shaving model
-    pretrained_model = f'{cfg.checkpoint.save_dir}/{cfg.checkpoint.restore_file}'
+    # pretrained_model = f'{cfg.checkpoint.save_dir}/{cfg.checkpoint.restore_file}'
+    pretrained_model = cfg.model.pretrained_model
     if os.path.isfile(pretrained_model):
         # print("+++++++ Loading pre-trained model for finetuning +++++++")
         model = checkpoint_utils.load_spt(pretrained_model, model)
@@ -184,21 +188,14 @@ def main(cfg: FairseqConfig) -> None:
         trainer.model.pm = extra_state['pruning_manager']
     ##############################################################
 
-    if cfg.common.tpu:
-        import torch_xla.core.xla_model as xm
-
-        xm.rendezvous("load_checkpoint")  # wait for all workers
-
     max_epoch = cfg.optimization.max_epoch or math.inf
     lr = trainer.get_lr()
 
     train_meter = meters.StopwatchMeter()
     train_meter.start()
 
-    ######################## For STP #######################
-    pruning_count = 0
-    #########################################################
-
+    trainer.model.phase = 'fine-tuning'
+    _phase = 'fine-tuning'
     is_first_epoch = True
     while epoch_itr.next_epoch_idx <= max_epoch:
         # Determine phase and performe pruning
@@ -206,8 +203,7 @@ def main(cfg: FairseqConfig) -> None:
             _epoch = epoch_itr.epoch
             is_first_epoch = False
         else:   
-            _epoch = epoch_itr.epoch + 1
-        # _phase, do_pruning = trainer.model.pm.get_phase(_epoch)
+            _epoch = epoch_itr.epoch + 1 
 
         if lr <= cfg.optimization.stop_min_lr:
             logger.info(
@@ -216,24 +212,27 @@ def main(cfg: FairseqConfig) -> None:
                 f"(--stop-min-lr={cfg.optimization.stop_min_lr})"
             )
             break
-        # print("* Current embedding_c: ",  trainer.model.decoder.embedding_c)
         # train for one epoch
         valid_losses, should_stop = train(cfg, trainer, task, epoch_itr)
-        # print("* After training an epoch: ", epoch_itr.epoch)
         # Check pruning target
         _params = np.sum([_p.numel() for _n, _p in trainer.model.named_parameters()
                           if _n[-2:] != '_c'])
         num_groups = trainer.model.get_num_groups()
         num_groups = [str(_num) for _num in num_groups]
         
-        ##################### SPT ##########################
-        _res = f'{epoch_itr.epoch},'
+        ##################### SPT  Pruning ##########################
+        # print pruning status        
+        _res = f'{_phase[0]},{epoch_itr.epoch},'
         _res+= ','.join(num_groups) + ','
+        # _group_res = group_report(trainer.model, gl_dict)
+        # _res += _group_res
         _res += f'{_params},{valid_losses[0]}'
+        # print("+"*15, '  Test ', '+'*15)
         logger.info(_res)
         _path_list = cfg.checkpoint.save_dir.split('/')
         _res_file = f'../checkpoints/res_files/{_path_list[-1]}.csv'
         logger.info(f"Result file: {_res_file}")
+        # print("+"*15, '  Test ', '+'*15)
         with open(_res_file, 'a') as f:
             f.write(_res + '\n')
         

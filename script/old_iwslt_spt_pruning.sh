@@ -1,4 +1,4 @@
-CUDA_VISIBLE_DEVICES=1 python ../src/train.py \
+CUDA_VISIBLE_DEVICES=1 python ../src/pruning.py \
     ../data-bin/iwslt14.tokenized.de-en \
     --user-dir ../src \
     --arch spt_iwslt_de_en --share-decoder-input-output-embed \
@@ -7,6 +7,9 @@ CUDA_VISIBLE_DEVICES=1 python ../src/train.py \
     --lr 5e-4 --lr-scheduler inverse_sqrt --warmup-updates 4000 \
     --dropout 0.3 --weight-decay 0.0001 \
     --criterion spt --label-smoothing 0.1 \
+    --compression-rate 0.9 --srp \
+    --pruning-iter 1 --pruning-period 10 --decreasing ea \
+    --attn-kd 0.000 \
     --max-tokens 4096 \
     --eval-bleu \
     --eval-bleu-args '{"beam": 5, "max_len_a": 1.2, "max_len_b": 10}' \
@@ -15,3 +18,4 @@ CUDA_VISIBLE_DEVICES=1 python ../src/train.py \
     --eval-bleu-print-samples \
     --best-checkpoint-metric bleu --maximize-best-checkpoint-metric \
     --save-dir ../checkpoints/3 \
+    --pretrained-model ../checkpoints/1/checkpoint_best.pt

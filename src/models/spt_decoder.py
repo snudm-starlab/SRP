@@ -200,6 +200,7 @@ class SPTDecoderBase(FairseqIncrementalDecoder):
         src_lengths: Optional[Any] = None,
         return_all_hiddens: bool = False,
         compute_c=False,
+        use_kd=False,
     ):
         """
         Args:
@@ -219,21 +220,36 @@ class SPTDecoderBase(FairseqIncrementalDecoder):
                 - the decoder's output of shape `(batch, tgt_len, vocab)`
                 - a dictionary with any model-specific outputs
         """
-
-        x, extra = self.extract_features(
-            prev_output_tokens,
-            encoder_out=encoder_out,
-            incremental_state=incremental_state,
-            full_context_alignment=full_context_alignment,
-            alignment_layer=alignment_layer,
-            alignment_heads=alignment_heads,
-            compute_c=compute_c,
-        )
+        if use_kd:
+            x, extra, hidden_states = self.extract_features(
+                prev_output_tokens,
+                encoder_out=encoder_out,
+                incremental_state=incremental_state,
+                full_context_alignment=full_context_alignment,
+                alignment_layer=alignment_layer,
+                alignment_heads=alignment_heads,
+                compute_c=compute_c,
+                use_kd=use_kd,
+            )
+        else:
+            x, extra = self.extract_features(
+                prev_output_tokens,
+                encoder_out=encoder_out,
+                incremental_state=incremental_state,
+                full_context_alignment=full_context_alignment,
+                alignment_layer=alignment_layer,
+                alignment_heads=alignment_heads,
+                compute_c=compute_c,
+                use_kd=use_kd,
+            )
 
         if not features_only:
             if compute_c:
                 x*=self.embedding_c
             x = self.output_layer(x)
+
+        if use_kd:
+            return x, extra, hidden_states
         return x, extra
 
     def extract_features(
@@ -245,6 +261,7 @@ class SPTDecoderBase(FairseqIncrementalDecoder):
         alignment_layer: Optional[int] = None,
         alignment_heads: Optional[int] = None,
         compute_c: bool = False,
+        use_kd=False,
     ):
         return self.extract_features_scriptable(
             prev_output_tokens,
@@ -254,6 +271,7 @@ class SPTDecoderBase(FairseqIncrementalDecoder):
             alignment_layer,
             alignment_heads,
             compute_c=compute_c,
+            use_kd=use_kd,
         )
 
     """
@@ -271,6 +289,7 @@ class SPTDecoderBase(FairseqIncrementalDecoder):
         alignment_layer: Optional[int] = None,
         alignment_heads: Optional[int] = None,
         compute_c=False,
+        use_kd=False,
     ):
         """
         Similar to *forward* but only return features.
@@ -343,7 +362,8 @@ class SPTDecoderBase(FairseqIncrementalDecoder):
         self_attn_padding_mask: Optional[Tensor] = None
         if self.cross_self_attention or prev_output_tokens.eq(self.padding_idx).any():
             self_attn_padding_mask = prev_output_tokens.eq(self.padding_idx)
-
+        
+        hidden_states = {}
         # decoder layers
         attn: Optional[Tensor] = None
         inner_states: List[Optional[Tensor]] = [x]
@@ -352,19 +372,37 @@ class SPTDecoderBase(FairseqIncrementalDecoder):
                 self_attn_mask = self.buffered_future_mask(x)
             else:
                 self_attn_mask = None
+            if not use_kd:
+                x, layer_attn, _ = layer(
+                    x,
+                    enc,
+                    padding_mask,
+                    incremental_state,
+                    self_attn_mask=self_attn_mask,
+                    self_attn_padding_mask=self_attn_padding_mask,
+                    need_attn=bool((idx == alignment_layer)),
+                    need_head_weights=bool((idx == alignment_layer)),
+                    embedding_c=self.embedding_c,
+                    compute_c=compute_c,
+                )
+            else:
+                x, layer_attn, _, hs = layer(
+                    x,
+                    enc,
+                    padding_mask,
+                    incremental_state,
+                    self_attn_mask=self_attn_mask,
+                    self_attn_padding_mask=self_attn_padding_mask,
+                    need_attn=bool((idx == alignment_layer)),
+                    need_head_weights=bool((idx == alignment_layer)),
+                    embedding_c=self.embedding_c,
+                    compute_c=compute_c,
+                    use_kd=use_kd,
+                )
+                hidden_states[f'decoder.self_attn.{idx}'] = hs['self_attn']
+                hidden_states[f'decoder.encoder_attn.{idx}'] = hs['encoder_attn']
+                hidden_states[f'decoder.fc.{idx}'] = hs['fc']
 
-            x, layer_attn, _ = layer(
-                x,
-                enc,
-                padding_mask,
-                incremental_state,
-                self_attn_mask=self_attn_mask,
-                self_attn_padding_mask=self_attn_padding_mask,
-                need_attn=bool((idx == alignment_layer)),
-                need_head_weights=bool((idx == alignment_layer)),
-                embedding_c=self.embedding_c,
-                compute_c=compute_c,
-            )
             inner_states.append(x)
             if layer_attn is not None and idx == alignment_layer:
                 attn = layer_attn.float().to(x)
@@ -384,6 +422,8 @@ class SPTDecoderBase(FairseqIncrementalDecoder):
 
         if self.project_out_dim is not None:
             x = self.project_out_dim(x)
+        if use_kd:
+            return x, {"attn": [attn], "inner_states": inner_states}, hidden_states
 
         return x, {"attn": [attn], "inner_states": inner_states}
 

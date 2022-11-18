@@ -229,9 +229,37 @@ class SPTConfig(FairseqDataclass):
             "help": "Target compression rate. Stop pruning if spt meets this"
         },
     )
+    
+    use_kd: bool = field(
+        default=False,
+        metadata={
+            "help": "Use kd or not"
+        },
+    )
+
+    pretrained_model: str = field(
+        default=False,
+        metadata={
+            "help": "path for pretrained model"
+        },
+    )
+    
+    srp: bool = field(
+        default=False,
+        metadata={
+            "help": "pruning type"
+        },
+    )
+    
+    weighted_layernorm: bool = field(
+        default=False,
+        metadata={
+            "help": "use weighted layernorm or not"
+        },
+    )
 
     pruning_iter: int = field(
-        default=4,
+        default=1,
         metadata={
             "help": "number of epochs for pruning after warming-up epochs"
         },
@@ -259,6 +287,40 @@ class SPTConfig(FairseqDataclass):
             "help": "Warming up epochs before pruning"
         },
     )
+
+    pruning_stage: int = field(
+        default=0,
+        metadata={
+            "help": "1: only global emb 2: except global emb else: pruning all"
+        },
+    )
+
+    ####################### Loss ###############################
+    
+    attn_kd: float = field(
+        default=0.0,
+        metadata={"help": "coefficient for attention map kd"},
+    )
+
+    fc_kd: float = field(
+        default=0.0,
+        metadata={"help": "coefficient for fc kd"},
+    )
+
+    emb_kd: float = field(
+        default=0.0,
+        metadata={"help": "coefficient for embedding kd"},
+    )
+    prob_kd: float = field(
+        default=0.7,
+        metadata={"help": "coefficient for prob kd"},
+    )
+
+    T: float= field(
+        default=10,
+        metadata={"help": "temperature for kd"},
+    )
+    ###########################################################
 
     ##############################################################################
 

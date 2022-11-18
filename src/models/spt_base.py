@@ -17,6 +17,7 @@ from fairseq.models import FairseqEncoderDecoderModel
 from .spt_config import SPTConfig
 from .spt_encoder import SPTEncoderBase
 from .spt_decoder import SPTDecoderBase
+
 """
 from . import (
     SPTConfig,
@@ -148,6 +149,7 @@ class SPTModelBase(FairseqEncoderDecoderModel):
         features_only: bool = False,
         alignment_layer: Optional[int] = None,
         alignment_heads: Optional[int] = None,
+        use_kd=False,
     ):
         """
         Run the forward pass for an encoder-decoder model.
@@ -160,22 +162,44 @@ class SPTModelBase(FairseqEncoderDecoderModel):
         else:
             compute_c = False
 
+        if not use_kd:
+            encoder_out = self.encoder(
+                src_tokens, src_lengths=src_lengths, return_all_hiddens=return_all_hiddens,
+                compute_c=compute_c,
+            )
+            decoder_out = self.decoder(
+                prev_output_tokens,
+                encoder_out=encoder_out,
+                features_only=features_only,
+                alignment_layer=alignment_layer,
+                alignment_heads=alignment_heads,
+                src_lengths=src_lengths,
+                return_all_hiddens=return_all_hiddens,
+                compute_c=compute_c
+            )
+            return decoder_out
+        else:
+            hidden_states = {}
+            encoder_out = self.encoder(
+                src_tokens, src_lengths=src_lengths, return_all_hiddens=return_all_hiddens,
+                compute_c=compute_c, use_kd=use_kd
+            )
+            hidden_states.update(encoder_out["hidden_states"])
+            decoder_out = self.decoder(
+                prev_output_tokens,
+                encoder_out=encoder_out,
+                features_only=features_only,
+                alignment_layer=alignment_layer,
+                alignment_heads=alignment_heads,
+                src_lengths=src_lengths,
+                return_all_hiddens=return_all_hiddens,
+                compute_c=compute_c,
+                use_kd=use_kd
+            )
+            hidden_states.update(decoder_out[-1])
+            return decoder_out, hidden_states
 
-        encoder_out = self.encoder(
-            src_tokens, src_lengths=src_lengths, return_all_hiddens=return_all_hiddens,
-            compute_c=compute_c,
-        )
-        decoder_out = self.decoder(
-            prev_output_tokens,
-            encoder_out=encoder_out,
-            features_only=features_only,
-            alignment_layer=alignment_layer,
-            alignment_heads=alignment_heads,
-            src_lengths=src_lengths,
-            return_all_hiddens=return_all_hiddens,
-            compute_c=compute_c
-        )
-        return decoder_out
+
 
     # Since get_normalized_probs is in the Fairseq Model which is not scriptable,
     # I rewrite the get_normalized_probs from Base Class to call the
@@ -208,9 +232,13 @@ class SPTModelBase(FairseqEncoderDecoderModel):
         ratio = _ratio if _ratio else pm.c_shrink_rate
         dec = pm._decreasing         
 
+        is_first = True
         for _n in pd.keys():
             _indices = pd[_n]
             _p = recursive_get_param(self, _n)
+            # if is_first:
+            #     print("=======================================")
+            #     print("Before decreasing: ", _p[_indices][0:10])
             if dec[1] == 'a':
                 # Arithmetic
                 _p[_indices] = _p[_indices] - ratio
@@ -219,6 +247,10 @@ class SPTModelBase(FairseqEncoderDecoderModel):
                 _p[_indices] = _p[_indices] * ratio
             else:
                 raise Exception('Not an identified decreasing type')
+            # if is_first:
+            #     print("After decreasing: ", _p[_indices][0:10])
+            #     print("=======================================")
+            #     is_first=False
 
     @torch.no_grad()
     def pruning(self,):
@@ -464,21 +496,33 @@ class PruningManager():
         p = (-1 * A + np.sqrt(A ** 2 - 4 * B) ) / 2
         return p 
 
-    def get(self, ):
-        assert self.count < self.pruning_iter
-        self.count += 1
+    def get(self, stage=0):
+        print(f"############# {self.count} ################# {self.pruning_iter}")
+        if self.count > self.pruning_iter-1:
+        # if self.count > self.pruning_iter:
+            # Do not pruning
+            return -1, -1, -1, -1, -1
         gle = int(np.ceil(self.GLE * self.p))
         gld = int(np.ceil(self.GLD * self.p))
         fc = int(np.ceil(self.FC * self.p))
         qk = int(np.ceil(self.QK * self.p))
         vo = int(np.ceil(self.VO * self.p))
+        
+        if stage == 1:
+            fc = 0; qk = 0 ; vo=0
+            self.count += 0.5
+        elif stage ==2:
+            gle = 0 ; gld = 0
+            self.count += 0.5
+        else:
+            self.count += 1      
 
         self.GLE -= gle
         self.GLD -= gld
         self.FC -= fc
         self.QK -= qk
         self.VO -= vo
-        
+         
         return gle, gld, fc, qk, vo
 
     def update_embedding_mask(self, ende):
@@ -509,7 +553,7 @@ class PruningManager():
                          (e - self.warming_up - self.pruning_iter) <= 1
         else:
             do_pruning = ((e - self.warming_up) > 1) and \
-                        ((e - self.warming_up) % self.pruning_period == 1) \
+                        ((e - self.warming_up) % self.pruning_period == 0) \
                         and (e - self.warming_up) -  (self.pruning_period * self.pruning_iter) <= 1
         return _p, do_pruning
 
