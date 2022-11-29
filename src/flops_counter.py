@@ -173,6 +173,19 @@ if __name__ == "__main__":
 
     ############## COMPRESSED MODEL ######################
     FLOPs2 = []
+    emb, heads, fnn = 80, 4, 160
+    en_self_qks = [emb]*6
+    en_self_vos = [emb]*6
+    en_fcs = [fnn]*6
+
+
+    de_self_qks = [emb]*6
+    de_self_vos = [emb]*6
+    de_encoder_qks = [emb]*6
+    de_encoder_vos = [emb]*6
+    de_fcs = [fnn]*6    
+    tar_dict_size = 6632
+    """
     emb, heads = 259, 4
     en_self_qks = [256, 256, 256]
     en_self_vos = [256, 256, 256]
@@ -185,8 +198,7 @@ if __name__ == "__main__":
     de_encoder_vos = [256] * 3
     de_fcs = [491, 552, 607]
     tar_dict_size = 6632
-
-    """
+    
     FLOPs2 = []
     emb, heads = 198, 4
     en_self_qks = [156,236,224,132,160,156]
