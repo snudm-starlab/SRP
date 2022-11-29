@@ -63,7 +63,10 @@ SRP
   │     ├── iwslt_srp.sh : a script for training a baseline model
   │     ├── iwslt_srp_pruning.sh : a script for pruning the pre-trained model
   │     ├── iwslt_srp_two_staged_pruning.sh a script for performing two-staged pruning 
+  │     ├── iwslt_srp_finetuning.sh a script for finetuning pruned model 
   │     └── iwslt_srp_test.sh: a script for testing the trained model 
+  ├──  data-bin : a directory for saving datasets
+  ├──  checkpoints : a directory for saving checkpoints 
   │  
   ├── LICENSE
   └── README.md
@@ -107,105 +110,152 @@ make
 
 ## Run Your Own Training
 * We provide scripts for pre-training, pruning and testing.
-Followings are key arguments to 
+Followings are key arguments:
+    * arch: architecture type
+    * 
 
 * First, we begin with training a Transformer model
 ```
-cd scripts
-bash iwslt_srp.sh
+CUDA_VISIBLE_DEVICES=0 python src/train.py \
+    data-bin/iwslt14.tokenized.de-en \
+    --user-dir src \
+    --arch srp_iwslt_de_en --share-decoder-input-output-embed \
+    --task SRPtranslation \
+    --optimizer srp_adam --adam-betas '(0.9, 0.98)' --clip-norm 0.0 \
+    --lr 5e-4 --lr-scheduler inverse_sqrt --warmup-updates 4000 \
+    --dropout 0.3 --weight-decay 0.0001 \
+    --criterion srp --label-smoothing 0.1 \
+    --max-tokens 4096 \
+    --eval-bleu \
+    --eval-bleu-args '{"beam": 5, "max_len_a": 1.2, "max_len_b": 10}' \
+    --eval-bleu-detok moses \
+    --eval-bleu-remove-bpe \
+    --eval-bleu-print-samples \
+    --best-checkpoint-metric bleu --maximize-best-checkpoint-metric \
+    --save-dir checkpoints/base \
 ```
-This code is alaso saved as scripts/iwslt_srp.sh
+This code is also saved in scripts/iwslt_srp.sh
 
 * To perform pruning using SRP, run script:
+    * For stage 1: 
 ```
-cd scripts
-bash iwslt_srp_pruning.sh
+CUDA_VISIBLE_DEVICES=0 python src/pruning.py \
+    data-bin/iwslt14.tokenized.de-en \
+    --user-dir src \
+    --arch srp_iwslt_de_en --share-decoder-input-output-embed \
+    --task SRPtranslation \
+    --optimizer srp_adam --adam-betas '(0.9, 0.98)' --clip-norm 0.0 \
+    --lr 5e-4 \
+    --dropout 0.3 --weight-decay 0.0001 \
+    --criterion srp --label-smoothing 0.1 \
+    --max-epoch 500 --weighted-layernorm \
+    --compression-rate 0.1 --srp --pruning-stage 1 \
+    --save-interval 100 \
+    --pruning-iter 1 --pruning-period 500 --decreasing sg \
+    --max-tokens 4096 \
+    --eval-bleu \
+    --eval-bleu-args '{"beam": 5, "max_len_a": 1.2, "max_len_b": 10}' \
+    --eval-bleu-detok moses \
+    --eval-bleu-remove-bpe \
+    --eval-bleu-print-samples \
+    --best-checkpoint-metric bleu --maximize-best-checkpoint-metric \
+    --save-dir checkpoints/stage1 \
+    --pretrained-model checkpoints/base/checkpoint_best.pt \
+
 ```
-This code is alaso saved as scripts/iwslt_srp_two_staged_pruning.sh
+
+    * For stage 2: 
+
+
+```
+CUDA_VISIBLE_DEVICES=0 python src/pruning.py \
+    data-bin/iwslt14.tokenized.de-en \
+    --user-dir src \
+    --arch srp_iwslt_de_en --share-decoder-input-output-embed \
+    --task SRPtranslation \
+    --optimizer srp_adam --adam-betas '(0.9, 0.98)' --clip-norm 0.0 \
+    --lr 5e-4 \
+    --dropout 0.3 --weight-decay 0.0001 \
+    --criterion srp --label-smoothing 0.1 \
+    --compression-rate 0.1 --srp --pruning-stage 2 \
+    --save-interval 100 --weighted-layernorm \
+    --pruning-iter 1 --pruning-period 500 --decreasing sg \
+    --max-tokens 4096 \
+    --eval-bleu \
+    --eval-bleu-args '{"beam": 5, "max_len_a": 1.2, "max_len_b": 10}' \
+    --eval-bleu-detok moses \
+    --eval-bleu-remove-bpe \
+    --eval-bleu-print-samples \
+    --best-checkpoint-metric bleu --maximize-best-checkpoint-metric \
+    --save-dir checkpoints/stage2 \
+    --pretrained-model checkpoints/stage1/checkpoint_last.pt
+```
+
+This codes is also saved in scripts/iwslt_srp_two_staged_pruning.sh
 
 * If you want to perform single-staged pruning, run script:
 ```
-cd scripts
-bash iwslt_srp_pruning.sh
+CUDA_VISIBLE_DEVICES=0 python src/pruning.py \
+    data-bin/iwslt14.tokenized.de-en \
+    --user-dir src \
+    --arch srp_iwslt_de_en --share-decoder-input-output-embed \
+    --task SRPtranslation \
+    --optimizer srp_adam --adam-betas '(0.9, 0.98)' --clip-norm 0.0 \
+    --lr 5e-4 \
+    --dropout 0.3 --weight-decay 0.0001 \
+    --criterion srp --label-smoothing 0.1 \
+    --compression-rate 0.1 --srp --pruning-stage 0 \
+    --max-epoch 300 \
+    --pruning-iter 1 --pruning-period 300 --decreasing sa \
+    --attn-kd 1 --prob-kd 0. --T 10 \
+    --max-tokens 4096 \
+    --eval-bleu \
+    --eval-bleu-args '{"beam": 5, "max_len_a": 1.2, "max_len_b": 10}' \
+    --eval-bleu-detok moses \
+    --eval-bleu-remove-bpe \
+    --eval-bleu-print-samples \
+    --best-checkpoint-metric bleu --maximize-best-checkpoint-metric \
+    --save-dir checkpoints/15 \
+    --pretrained-model checkpoints/base/checkpoint_best.pt
+
 ```
-This code is alaso saved as scripts/iwslt_srp_two_staged_pruning.sh
+This code is also saved in scripts/iwslt_srp_two_staged_pruning.sh
 
 * To perform finetuning after pruning, run script:
 ```
-cd scripts
-bash iwslt_srp_pruning.sh
+CUDA_VISIBLE_DEVICES=0 python src/finetuning.py \
+    data-bin/iwslt14.tokenized.de-en \
+    --user-dir src \
+    --arch srp_iwslt_de_en --share-decoder-input-output-embed \
+    --task SRPtranslation \
+    --optimizer srp_adam --adam-betas '(0.9, 0.98)' --clip-norm 0.0 \
+    --lr 5e-4 \
+    --dropout 0.3 --weight-decay 0.0001 \
+    --criterion srp --label-smoothing 0.1 \
+    --max-epoch 20 \
+    --attn-kd 1 --prob-kd 0. --T 10 \
+    --max-tokens 4096 \
+    --eval-bleu \
+    --eval-bleu-args '{"beam": 5, "max_len_a": 1.2, "max_len_b": 10}' \
+    --eval-bleu-detok moses \
+    --eval-bleu-remove-bpe \
+    --eval-bleu-print-samples \
+    --best-checkpoint-metric bleu --maximize-best-checkpoint-metric \
+    --save-dir checkpoints/fttest \
+    --pretrained-model checkpoints/p2/checkpoint_last.pt
 ```
-This code is alaso saved as scripts/iwslt_srp_two_staged_pruning.sh
+This code is also saved in scripts/iwslt_srp_two_staged_pruning.sh
 
 * To testing after pruning, run script:
 ```
-cd scripts
-bash iwslt_srp_pruning.sh
+CUDA_VISIBLE_DEVICES=0 python src/generate.py data-bin/iwslt14.tokenized.de-en \
+    --user-dir src --arch srp_iwslt_de_en --task SRPtranslation \
+    --weighted-layernorm \
+    --path checkpoints/base/checkpoint_best.pt \
+    --batch-size 128 --beam 5 --remove-bpe
 ```
-This code is alaso saved as scripts/iwslt_srp_two_staged_pruning.sh
+This code is also saved as scripts/iwslt_srp_two_staged_pruning.sh
 
 
 ## Reference
 * FAIRSEQ: https://github.com/facebookresearch/fairseq
-
-
-
-## Run your own training  
-* We provide an example how to run the codes. We use task: 'MRPC', teacher layer: 12, and student layer: 3 as an example.
-* Before starting, we need to specify a few things.
-    * task: one of the GLUE datasets
-    * train_type: one of the followings - ft, kd, pkd 
-    * model_type: one of the followings - Original, SPS
-    * student_hidden_layers: the number of student layers
-    * train_seed: the train seed to use. If default -> random 
-    * saving_criterion_acc: if the model's val accuracy is above this value, we save the model.
-    * saving_criterion_loss: if the model's val loss is below this value, we save the model.
-    * load_model_dir: specify a directory of the checkpoint if you want to load one.
-    * output_dir: specify a directory where the outputs will be written and saved.
-    
-* First, We begin with finetuning the teacher model
-    ```
-    run script
-    python src/finetune.py \
-    --task 'MRPC' \
-    --train_type 'ft' \
-    --model_type 'Original' \
-    --student_hidden_layers 12 \
-    --saving_criterion_acc 1.0 \
-    --saving_criterion_loss 0 .6 \
-    --output_dir 'run-1'
-    ```
-    The trained model will be saved in 'src/data/outputs/KD/{task}/teacher_12layer/'
-
-* To use the teacher model's predictions for PTP, KD, and PKD run script:
-    ```
-    python src/save_teacher_outputs.py
-    ```
-    The teacher predictions will be saved in 'src/data/outputs/KD/{task}/{task}_normal_kd_teacher_12layer_result_summary.pkl'
-    or 'src/data/outputs/KD/{task}/{task}_patient_kd_teacher_12layer_result_summary.pkl'
-
-* To apply PTP to the student model, run script:
-    ```
-    run script:
-    python src/PTP.py \
-    --task 'MRPC' \
-    --train_type 'ft' \
-    --model_type 'SPS' \
-    --student_hidden_layer 3 \
-    --saving_criterion_acc 0.8 \
-    --output_dir 'run-1'
-    ```
-    The pretrained student model will be saved in 'src/data/outputs/KD/{task}/teacher_12layer/'. 
-    you may specify the hyperparameter 't' in src/utils/nli_data_processing.py line 713~.
-* When PTP is done, we can finally finetune the student model by running script:
-    ```
-    python src/finetune.py \
-    --task 'MRPC' \
-    --train_type 'pkd' \
-    --model_type 'SPS' \
-    --student_hidden_layers 3 \
-    --saving_criterion_acc 1.0 \
-    --saving_criterion_loss 0.6 \
-    --load_model_dir 'run-1/PTP.encoder_loss.pkl' \
-    --output_dir 'run-1/final_results'
-    ```
