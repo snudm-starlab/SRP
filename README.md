@@ -1,108 +1,154 @@
-# Pea-KD 
-This project is a PyTorch implementation of Parameter-efficient and accurate Knowledge Distillation on BERT. This paper proposes a novel approach that improves Knowledge Distillation performance. This package is especially for BERT model.  
+# SRP (Selectively Regularized Pruning)
+This project is a PyTorch implementation of SRP (Selectively Regularized Pruning) on Transformer. SRP proposes a novel approach that improves structured pruning performance. This package is especially for Transformer model.  
 
 ## Overview
-#### Brief Explanation of the paper. 
-Two main ideas were proposed in the paper. Shuffled Parameter Sharing (SPS) and Pretraining with Teacher's Predictions (PTP). 
+#### Brief Explanation of SRP. 
+SRP proposed a novel process for pruning Transfomer and the process works as following three steps.
 
-1) SPS 
+0) Defining Pruning-safe Architecture
+We first define an architecture is pruning-safe for some parameters under some codition iff the inference of the model is consistent after pruning the parameters under the condition.
 
-- Step1 : Paired Parameter Sharing. 
-We first double the layers of the student model. Then, we share the parameters between the bottom half and the upper half. 
-By this way, the model has twice the number of layers and thus can have more 'effective' model complexity while having the same number of actual parameters. 
+1) Designing Pruning-safe Architecture
+We modify the architecture of Transformer to be pruning-safe. We introduce connectivity parameters and weighted layer normalization. 
+Our modified architecture is pruning safe when pruning parameters that its corresponding connectivity parameters are zero.
 
-- Step2 : Shuffling. 
-In addition to step1, we shuffle the Query and Key parameters between the shared pairs in order to further increase the 'effective' model complexity. 
-By this shuffling process, the parameter-shared pairs can have higher model complexity and thus better representation power. 
-We will call this architecture the SPS model. 
+2) Selecting Parameters to be pruned
+We compute the negative partial derivative of the objective function with respect to each connectivity parameter and use as for the importance score of the corresponding parameter. 
+We select parameters with the lowest importance score to be pruned.
 
-2) PTP 
+3) Shrinking Paramters with Selective Regularization
+We freeze the selected parameters and continuously shrinking corresponding connectivity parameters. 
+SRP proposes two types of shrinking strategies: arithmetic and geometrical shrinking.
+SRP proposed two-staged pruning which is a novel pruning strategy that prunes parameters within two stages.
 
-- We pretrain the student model with new artificial labels (PTP labels). The labels are assigned as follows.
-
-``` Unicode
-PTP labels 
-  ├── 'Confidently Correct' = teacher model's prediction is correct & confidence > t 
-  ├── 'Unconfidently Correct' = teacher model's prediction is correct & confidence <= t 
-  ├── 'Confidently Wrong' = teacher model's prediction is wrong & confidence > t 
-  └── 'Unconfidently Wrong' = teacher model's prediction is wrong & confidence <= t
-  t = hyperparameter : depends on the downstream task and the teacher model. e.g.) t = 0.95 for MRPC, t = 0.8 for RTE.
-```  
-#### Baseline Codes
-This repository is based on the [GitHub repository](https://github.com/intersun/PKD-for-BERT-Model-Compression) for [Patient Knowledge Distillation for BERT Model Compression](https://arxiv.org/abs/1908.09355). All source files are from the repository if not mentioned otherwise. The main scripts that actually run tasks are the following two files, and they have been modified from the original files in the original repository:
-- 'finetune.py', 'PTP.py' - based on 'NLI_KD_training.py' in the original repository.
-- 'save_teacher_outputs.py - based on 'run_glue_benchmark.py' in the original repository.
+#### Code Description
+This repository is based on the [FAIRSEQ](https://github.com/facebookresearch/fairseq).
+All source files are from the repository if not mentioned otherwise.
+The overall process 
 
 ``` Unicode
-PeaKD
+SRP
   │
-  ├──  src        
-  │     ├── BERT
-  │     │    └── pytorch_pretrained_bert: BERT sturcture files
-  │     ├── data
-  │     │    ├── data_raw
-  │     │    │     ├── glue_data: task dataset
-  │     │    │     └── download_glue_data.py
-  │     │    ├── models
-  │     │    │     └── bert_base_uncased: ckpt
-  │     │    └── outputs
-  │     │           └── save teacher model prediction & trained student model.
-  │     ├── utils : The overall utils. 
-  │     ├── envs.py: save directory paths for several usage.
-  │     ├── save_teacher_outputs.py : save teacher prediction. Used for PTP, KD, PKD e.t.c. 
-  │     ├── PTP.py : pretrain the student model with PTP. 
-  │     ├── finetune.py: comprehensive training file for teacher and student models.
-  │     └── finetune_ER.py: implementation of SPS.
-  ├── preprocess.sh: downloads GLUE datasets.
-  ├── Makefile: Makefile used for demo.
-  ├── Developers_Guide.docx
-  ├── requirements.txt: run this file to download required environments.
+  ├──  src    
+  │     ├── criterions
+  │     │    └── srp.py: customized criterion for SRP
+  │     ├── models
+  │     │    ├── srp_base.py: SRP model 
+  │     │    ├── srp_encoder.py: SRP encoder
+  │     │    ├── srp_decoder.py: SRP decoder
+  │     │    ├── srp_config.py: configurations of SRP
+  │     │    └── srp_legacy.py: the legacy implementation of the srp models
+  │     ├── modules
+  │     │    ├── layer_norm.py: codes for weighted layer normalization
+  │     │    ├── multihead_attention.py: modified codes for multihead attention
+  │     │    └── srp_layer.py : layers of encoder and decoder of SRP
+  │     ├── optim
+  │     │    └── SRPadam.py : customized Adam optimizer for SRP
+  │     ├── tasks
+  │     │    └── SRPtranslation : customized translation task for SRP
+  │     │    
+  │     ├── train.py : training a new model 
+  │     ├── trainer.py : codes for managing training process 
+  │     ├── pruning.py : pruning the pre-trained model
+  │     ├── finetuning.py : finetuning the pruned model
+  │     ├── generate.py : Translate pre-processed data with a trained model
+  │     ├── sequence_generator.py : Codes for generating sequences
+  │     ├── checkpoint_utils.py : Codes for saving and loading checkpoints
+  │     └── flops_counter.py: Codes for computing FLOPs of the model
+  │     
+  │     
+  ├──  scripts
+  │     ├── iwslt_preprocess.sh: a script for downloading and preprocess iwslt14
+  │     ├── prepare-iwslt14.sh : a script for preparing iwslt14 which is run by iwslt_preprocess.sh
+  │     ├── iwslt_srp.sh : a script for training a baseline model
+  │     ├── iwslt_srp_pruning.sh : a script for pruning the pre-trained model
+  │     ├── iwslt_srp_two_staged_pruning.sh a script for performing two-staged pruning 
+  │     └── iwslt_srp_test.sh: a script for testing the trained model 
+  │  
   ├── LICENSE
   └── README.md
+
 ```
-
-#### Data description
-- GLUE datasets
-
-* Note that: 
-    * GLUE datasets consist of CoLA, diagnostic, MNLI, MRPC, QNLI, QQP, RTE, SNLI, SST-2, STS-B, WNLI
-    * You can download GLUE datasets by running bash 'preprocess.sh'.
-
 
 ## Install 
 
 #### Environment 
 * Ubuntu
-* CUDA 10.0
-* Pytorch 1.4 
-* numpy
-* torch
-* Tensorly
-* tqdm
-* pandas
-* apex
+* CUDA 11.6
+* numpy 1.23.4
+* torch 1.12.1
+* sacrebleu 2.0.0
+* pandas 
 
-## Dependence Install
+## Installing Requirements
+Install [PyTorch](http://pytorch.org/) (version >= 1.5.0) and install fairseq by following instructions:
 ```
-cd PeaKD
-pip install -r requirements.txt
+git clone https://github.com/pytorch/fairseq 
+cd fairseq
+git reset --hard 0b54d9fb2e42c2f40db3449ca34586952b8abe94
+pip install --editable ./
+pip install sacremoses
 ```
 
 # Getting Started
 
 ## Preprocess
-Download GLUE datasets by running script:
+Download IWSLT'14 German to English dataset by running script:
 ```
-bash preprocess.sh
+cd scripts
+bash iwslt_preprocess.sh
 ```
-You must download your own pretrained BERT model at 'src/data/models/pretrained/bert-base-uncased'. 
-Refer to 'src/BERT/pytorch_pretrained_bert/modeling.py' line 43~51.
 
 ## Demo 
 you can run the demo version.
 ```
 make
 ```
+
+## Run Your Own Training
+* We provide scripts for pre-training, pruning and testing.
+Followings are key arguments to 
+
+* First, we begin with training a Transformer model
+```
+cd scripts
+bash iwslt_srp.sh
+```
+This code is alaso saved as scripts/iwslt_srp.sh
+
+* To perform pruning using SRP, run script:
+```
+cd scripts
+bash iwslt_srp_pruning.sh
+```
+This code is alaso saved as scripts/iwslt_srp_two_staged_pruning.sh
+
+* If you want to perform single-staged pruning, run script:
+```
+cd scripts
+bash iwslt_srp_pruning.sh
+```
+This code is alaso saved as scripts/iwslt_srp_two_staged_pruning.sh
+
+* To perform finetuning after pruning, run script:
+```
+cd scripts
+bash iwslt_srp_pruning.sh
+```
+This code is alaso saved as scripts/iwslt_srp_two_staged_pruning.sh
+
+* To testing after pruning, run script:
+```
+cd scripts
+bash iwslt_srp_pruning.sh
+```
+This code is alaso saved as scripts/iwslt_srp_two_staged_pruning.sh
+
+
+## Reference
+* FAIRSEQ: https://github.com/facebookresearch/fairseq
+
+
 
 ## Run your own training  
 * We provide an example how to run the codes. We use task: 'MRPC', teacher layer: 12, and student layer: 3 as an example.
