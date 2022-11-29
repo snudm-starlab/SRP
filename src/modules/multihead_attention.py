@@ -1,7 +1,18 @@
-# Copyright (c) Facebook, Inc. and its affiliates.
+################################################################################
+# Starlab Transformer Compression with SRP (Selectively Regularized Pruning)
 #
-# This source code is licensed under the MIT license found in the
-# LICENSE file in the root directory of this source tree.
+# Author: Hyojin Jeon (tarahjjeon@snu.ac.kr), Seoul National University
+#         U Kang (ukang@snu.ac.kr), Seoul National University
+#
+# Version : 1.0
+# Date : Nov 29, 2022
+# Main Contact: Hyojin Jeon
+#
+# This software is free of charge under research purposes.
+# For commercial purposes, please contact the authors.
+# This code is mainly based on the [GitHub Repository]
+# [GitHub Repository]: https://github.com/facebookresearch/fairseq
+################################################################################
 
 import math
 from typing import Dict, List, Optional, Tuple
@@ -393,10 +404,8 @@ class MultiheadAttention(nn.Module):
                 v = self.v_proj(value)
             q *= self.scaling
 
-            ########## For scoring connections ###############
             if qk_c is not None:
                 q *= qk_c
-            ##################################################
 
             if self.bias_k is not None:
                 assert self.bias_v is not None
@@ -404,12 +413,10 @@ class MultiheadAttention(nn.Module):
                     k, v, attn_mask, key_padding_mask, bsz
                 )
             qk_dim = self.q_proj.weight.shape[0] // self.num_heads
-            # print("Q_proj.weight", self.q_proj.weight.shape)
             q = (
                 q.contiguous()
                 .view(tgt_len, bsz * self.num_heads, qk_dim)
                 .transpose(0, 1)
-                #.view(tgt_len, bsz * self.num_heads, self.head_dim)
             )
             kv_bsz = bsz  # need default value for scripting
             if k is not None:
@@ -418,7 +425,6 @@ class MultiheadAttention(nn.Module):
                     k.contiguous()
                     .view(-1, kv_bsz * self.num_heads, qk_dim)
                     .transpose(0, 1)
-                    # .view(-1, kv_bsz * self.num_heads, self.head_dim)
                 )
             if v is not None:
                 v_dim = v.size(2) // self.num_heads
@@ -435,7 +441,6 @@ class MultiheadAttention(nn.Module):
                     assert _prev_key is not None
                     kv_bsz = _prev_key.size(0)
                     prev_k_dim = _prev_key.size(3)
-                    # prev_key = _prev_key.view(kv_bsz * self.num_heads, -1, self.head_dim)
                     prev_key = _prev_key.view(kv_bsz * self.num_heads, -1, prev_k_dim)
                     if static_kv:
                         k = prev_key
@@ -450,7 +455,6 @@ class MultiheadAttention(nn.Module):
                     prev_v_dim = _prev_value.size(3) 
                     prev_value = _prev_value.view(
                         kv_bsz * self.num_heads, -1, prev_v_dim
-                        # kv_bsz * self.num_heads, -1, self.head_dim
                     )
                     if static_kv:
                         v = prev_value
@@ -470,11 +474,9 @@ class MultiheadAttention(nn.Module):
                 )
 
                 saved_state["prev_key"] = k.view(kv_bsz, self.num_heads, -1, qk_dim)
-                # saved_state["prev_key"] = k.view(kv_bsz, self.num_heads, -1, self.head_dim)
                 v_dim = v.shape[2]
                 saved_state["prev_value"] = v.contiguous().view(
                     kv_bsz, self.num_heads, -1, v_dim
-                    # kv_bsz, self.num_heads, -1, self.head_dim
                 )
                 saved_state["prev_key_padding_mask"] = key_padding_mask
                 # In this branch incremental_state is never None
@@ -553,8 +555,6 @@ class MultiheadAttention(nn.Module):
 
         # To here
         else:
-            ################################# For SPT #############################
-            # Skip matrix multiplication if 0 groups survive
             kv_bsz = bsz  # need default value for scripting
             
             if self.self_attention:
@@ -574,15 +574,11 @@ class MultiheadAttention(nn.Module):
                             key_padding_mask = key_padding_mask.view(
                                 -1, self.beam_size, key_padding_mask.size(1)
                             )[:, 0, :]
-                    # k = self.k_proj(key)
                     v = self.v_proj(key)
 
             else:
                 assert key is not None and value is not None
-                # q = self.q_proj(query)
-                # k = self.k_proj(key)
                 v = self.v_proj(value)
-            # v = self.v_proj(query)
             v_dim = v.size(2) // self.num_heads
             v = (
                 v.contiguous()
@@ -591,7 +587,6 @@ class MultiheadAttention(nn.Module):
             )
             attn_weights = torch.ones(bsz * self.num_heads, tgt_len, src_len)
             if return_A:
-                # A = copy.deepcopy(attn_weights)
                 A = attn_weights.clone()
             attn_weights = attn_weights.to(f'cuda:{v.get_device()}')
             attn_weights_float = utils.softmax(
@@ -599,16 +594,6 @@ class MultiheadAttention(nn.Module):
             )
             attn_weights = attn_weights_float.type_as(attn_weights)
             attn_probs = self.dropout_module(attn_weights)
-            """
-            print("+" * 20)
-            print(f"v.shape: {v.shape} | attm_weights.shape: {attn_weights.shape}")
-            print(f"src_len: {src_len} | tgt_len: {tgt_len} | bsz: {bsz} | kv_bsz: {kv_bsz}")
-            print(v.shape, attn_weights.shape)
-            print("+" * 20)
-            """
-
-            # attn = torch.bmm(attn_probs, v) # For dimension check
-            #######################################################################
         assert v is not None
         if self.encoder_decoder_attention and bsz != kv_bsz:
             attn = torch.einsum(
@@ -643,10 +628,8 @@ class MultiheadAttention(nn.Module):
         else:
             attn = attn.transpose(0, 1).contiguous().view(tgt_len, bsz, vo_dim)
         
-        ############### For scoring connections ########################
         if vo_c is not None:
             attn *= vo_c 
-        ################################################################
 
         # Perform output projection
         attn = self.out_proj(attn)

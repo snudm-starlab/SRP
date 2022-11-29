@@ -1,8 +1,20 @@
 #!/usr/bin/env python3 -u
-# Copyright (c) Facebook, Inc. and its affiliates.
+################################################################################
+# Starlab Transformer Compression with SRP (Selectively Regularized Pruning)
 #
-# This source code is licensed under the MIT license found in the
-# LICENSE file in the root directory of this source tree.
+# Author: Hyojin Jeon (tarahjjeon@snu.ac.kr), Seoul National University
+#         U Kang (ukang@snu.ac.kr), Seoul National University
+#
+# Version : 1.0
+# Date : Nov 29, 2022
+# Main Contact: Hyojin Jeon
+#
+# This software is free of charge under research purposes.
+# For commercial purposes, please contact the authors.
+# This code is mainly based on the [GitHub Repository]
+# [GitHub Repository]: https://github.com/facebookresearch/fairseq
+################################################################################
+
 """
 Train a new model on one or across multiple GPUs.
 """
@@ -96,14 +108,10 @@ def main(cfg: FairseqConfig) -> None:
     else:
         model = task.build_model(cfg.model)
 
-    ############# Perform shaping Model for loading Pruned Model #################
-    # pass checkpoint path and shaving model
+    # pass checkpoint path and reshaping the model
     pretrained_model = f'{cfg.checkpoint.save_dir}/{cfg.checkpoint.restore_file}'
     if os.path.isfile(pretrained_model):
-        # print("+++++++ Loading pre-trained model for finetuning +++++++")
-        model = checkpoint_utils.load_spt(pretrained_model, model)
-        # print("+++++ Loading pre-trained model for finetuning done +++++")
-    ##############################################################################
+        model = checkpoint_utils.load_srp(pretrained_model, model)
 
     criterion = task.build_criterion(cfg.criterion)
     logger.info(model)
@@ -172,7 +180,6 @@ def main(cfg: FairseqConfig) -> None:
 
     # Load the latest checkpoint if one is available and restore the
     # corresponding train iterator
-    ##################### For SPT ################################
     extra_state, epoch_itr = checkpoint_utils.load_checkpoint(
         cfg.checkpoint,
         trainer,
@@ -182,7 +189,6 @@ def main(cfg: FairseqConfig) -> None:
 
     if extra_state is not None and 'pruning_manager' in extra_state:
         trainer.model.pm = extra_state['pruning_manager']
-    ##############################################################
 
     if cfg.common.tpu:
         import torch_xla.core.xla_model as xm
@@ -195,9 +201,7 @@ def main(cfg: FairseqConfig) -> None:
     train_meter = meters.StopwatchMeter()
     train_meter.start()
 
-    ######################## For STP #######################
     pruning_count = 0
-    #########################################################
 
     is_first_epoch = True
     while epoch_itr.next_epoch_idx <= max_epoch:
@@ -207,7 +211,6 @@ def main(cfg: FairseqConfig) -> None:
             is_first_epoch = False
         else:   
             _epoch = epoch_itr.epoch + 1
-        # _phase, do_pruning = trainer.model.pm.get_phase(_epoch)
 
         if lr <= cfg.optimization.stop_min_lr:
             logger.info(
@@ -216,17 +219,16 @@ def main(cfg: FairseqConfig) -> None:
                 f"(--stop-min-lr={cfg.optimization.stop_min_lr})"
             )
             break
-        # print("* Current embedding_c: ",  trainer.model.decoder.embedding_c)
         # train for one epoch
         valid_losses, should_stop = train(cfg, trainer, task, epoch_itr)
-        # print("* After training an epoch: ", epoch_itr.epoch)
+        
         # Check pruning target
         _params = np.sum([_p.numel() for _n, _p in trainer.model.named_parameters()
                           if _n[-2:] != '_c'])
         num_groups = trainer.model.get_num_groups()
         num_groups = [str(_num) for _num in num_groups]
         
-        ##################### SPT ##########################
+        # Writing training status (param/ bleu/ groups change)
         _res = f'{epoch_itr.epoch},'
         _res+= ','.join(num_groups) + ','
         _res += f'{_params},{valid_losses[0]}'
@@ -237,9 +239,6 @@ def main(cfg: FairseqConfig) -> None:
         with open(_res_file, 'a') as f:
             f.write(_res + '\n')
         
-        # Save pruning status (param/ bleu/ groups change)
-        ##############################################################
-
         if should_stop:
             break
 
@@ -609,10 +608,6 @@ def cli_main(
                 distributed_utils.call_main(cfg, main)
     else:
         distributed_utils.call_main(cfg, main)
-
-    # if cfg.common.use_plasma_view:
-    #     server.server.kill()
-
 
 if __name__ == "__main__":
     cli_main()

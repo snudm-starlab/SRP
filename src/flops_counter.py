@@ -1,4 +1,18 @@
-# Ref: https://github.com/google-research/electra/blob/master/flops_computation.py
+################################################################################
+# Starlab Transformer Compression with SRP (Selectively Regularized Pruning)
+#
+# Author: Hyojin Jeon (tarahjjeon@snu.ac.kr), Seoul National University
+#         U Kang (ukang@snu.ac.kr), Seoul National University
+#
+# Version : 1.0
+# Date : Nov 29, 2022
+# Main Contact: Hyojin Jeon
+#
+# This software is free of charge under research purposes.
+# For commercial purposes, please contact the authors.
+# This code is mainly based on the [GitHub Repository]
+# [GitHub Repository]: https://github.com/google-research/electra/blob/master/flops_computation.py
+################################################################################
 
 DROPOUT_FLOPS = 4
 LAYER_NORM_FLOPS = 5
@@ -7,6 +21,10 @@ SOFTMAX_FLOPS = 8
 
 
 class FLOPS_COUNTER:
+    """
+    class for counting the numer of FLOP
+    for generating sequence of the given length
+    """
     def __init__(self, s, emb, heads,
                        en_self_qks, en_self_vos, en_fcs,
                        de_self_qks, de_self_vos, de_fcs,
@@ -29,8 +47,8 @@ class FLOPS_COUNTER:
 
         self.tar_dict_size = tar_dict_size
 
-    # FLOPs for sub-layers
     def get_attn_flops(self, qk, vo, _s, compute_kv=True):
+        # compute the FLOPs of the attention sub-layer
         # emb, qk, vo: dimensions
         attn_flops = dict(
             # projection
@@ -63,7 +81,7 @@ class FLOPS_COUNTER:
         return sum(attn_flops.values()) * _s
 
     def get_fc_flops(self, fc, _s):
-        # fc: intermediate dimension
+        # compute the FLOPs of the feedforward sub-layer
         fc_flops = dict(
             # first fc layer
             intermediate = 2 * self.emb * fc,
@@ -81,10 +99,10 @@ class FLOPS_COUNTER:
 
         return sum(fc_flops.values()) * _s
 
-    # FLOPs for a single layer
     def get_layer_flops(self, self_qk=None, self_vo=None, 
                         encoder_qk=None, encoder_vo=None, 
                         fc=None, sequence_length=-1):
+        # Compute the FLOPs of a single layer
         if sequence_length == -1:
             sequence_length = self.s
 
@@ -98,6 +116,7 @@ class FLOPS_COUNTER:
         return sum(layer_flops.values())
 
     def get_encoder_flops(self, self_qks, self_vos, fcs):
+        # Compute the FLOPs of an encoder
         _tot = 0
         for i in range(len(self_qks)):
             # Accumulate FLOPs of each layer
@@ -109,6 +128,7 @@ class FLOPS_COUNTER:
     def get_decoder_flops(self, self_qks, self_vos, 
                                 encoder_qks, encoder_vos, fcs,
                                 sequence_length):
+        # Compute the FLOPs of a decoder
         _tot = 0
         for sl in range(1, sequence_length+1):
             for i in range(len(self_qks)):
@@ -167,7 +187,6 @@ if __name__ == "__main__":
     flops1 = fc1.get_model_flops()
     FLOPs1.append(flops1)
     f1 = sum(FLOPs1) / 1e9
-    print(f1)
     ######################################################
     
 
@@ -185,34 +204,6 @@ if __name__ == "__main__":
     de_encoder_vos = [emb]*6
     de_fcs = [fnn]*6    
     tar_dict_size = 6632
-    """
-    emb, heads = 259, 4
-    en_self_qks = [256, 256, 256]
-    en_self_vos = [256, 256, 256]
-    en_fcs = [451, 476, 531]
-
-
-    de_self_qks = [256] * 3
-    de_self_vos = [256] * 3
-    de_encoder_qks = [256] * 3
-    de_encoder_vos = [256] * 3
-    de_fcs = [491, 552, 607]
-    tar_dict_size = 6632
-    
-    FLOPs2 = []
-    emb, heads = 198, 4
-    en_self_qks = [156,236,224,132,160,156]
-    en_self_vos = [268,272,248,180,192,184]
-    en_fcs = [324,333,311,340,293,484]
-
-
-    de_self_qks = [372,188,196,196,244,356]
-    de_self_vos = [320,208,168,180,192,196]
-    de_encoder_qks = [236,224,128,152,124,104]
-    de_encoder_vos = [268,236,140,188,92,52]
-    de_fcs = [335,299,446,473,481,566]
-    tar_dict_size = 6632
-    """
                 
     fc2 = FLOPS_COUNTER(s, emb, heads,
                 en_self_qks, en_self_vos, en_fcs,
@@ -224,7 +215,7 @@ if __name__ == "__main__":
     f2 = sum(FLOPs2) / 1e9
     ####################################################
 
-    # Print
+    # Print the results
     print("* FLOPs")
     print(f"- Base model: {f1:.2f}G")
     print(f"- Comp. model: {f2:.2f}G")

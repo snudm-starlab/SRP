@@ -1,10 +1,21 @@
 #!/usr/bin/env python3 -u
-# Copyright (c) Facebook, Inc. and its affiliates.
+################################################################################
+# Starlab Transformer Compression with SRP (Selectively Regularized Pruning)
 #
-# This source code is licensed under the MIT license found in the
-# LICENSE file in the root directory of this source tree.
+# Author: Hyojin Jeon (tarahjjeon@snu.ac.kr), Seoul National University
+#         U Kang (ukang@snu.ac.kr), Seoul National University
+#
+# Version : 1.0
+# Date : Nov 29, 2022
+# Main Contact: Hyojin Jeon
+#
+# This software is free of charge under research purposes.
+# For commercial purposes, please contact the authors.
+# This code is mainly based on the [GitHub Repository]
+# [GitHub Repository]: https://github.com/facebookresearch/fairseq
+################################################################################
 """
-Train a new model on one or across multiple GPUs.
+Pruning pre-trained model with SRP 
 """
 
 import argparse
@@ -99,15 +110,11 @@ def main(cfg: FairseqConfig) -> None:
     else:
         model = task.build_model(cfg.model)
 
-    ############# Perform shaping Model for loading Pruned Model #################
-    # pass checkpoint path and shaving model
-    # pretrained_model = f'{cfg.checkpoint.save_dir}/{cfg.checkpoint.restore_file}'
+    # Get the checkpoint path of pretrained model
+    # and Load the model regardless the shape of each weight  
     pretrained_model = cfg.model.pretrained_model
     if os.path.isfile(pretrained_model):
-        # print("+++++++ Loading pre-trained model for finetuning +++++++")
-        model = checkpoint_utils.load_spt(pretrained_model, model)
-        # print("+++++ Loading pre-trained model for finetuning done +++++")
-    ##############################################################################
+        model = checkpoint_utils.load_srp(pretrained_model, model)
 
     criterion = task.build_criterion(cfg.criterion)
     logger.info(model)
@@ -176,17 +183,15 @@ def main(cfg: FairseqConfig) -> None:
 
     # Load the latest checkpoint if one is available and restore the
     # corresponding train iterator
-    ##################### For SPT ################################
     extra_state, epoch_itr = checkpoint_utils.load_checkpoint(
         cfg.checkpoint,
         trainer,
         # don't cache epoch iterators for sharded datasets
         disable_iterator_cache=task.has_sharded_data("train"),
     )
-
+    # Load the pruning manager of the checkpoint if exists
     if extra_state is not None and 'pruning_manager' in extra_state:
         trainer.model.pm = extra_state['pruning_manager']
-    ##############################################################
 
     max_epoch = cfg.optimization.max_epoch or math.inf
     lr = trainer.get_lr()
@@ -194,15 +199,12 @@ def main(cfg: FairseqConfig) -> None:
     train_meter = meters.StopwatchMeter()
     train_meter.start()
 
-    ######################## For STP #######################
-    # Load sample dataset for pruning
-    # Get samples
+    # Load sample dataset for pruning 
     with open(f'../data-bin/iwslt14.tokenized.de-en/samples/samples0.pkl', 'rb') as f:
         samples = pickle.load(f)
-    # print("##############3 ", getattr(cfg.model, 'srp', False))
     
     if getattr(cfg.model, 'srp', False):
-        # Remove --srp argument for instant pruning
+        # The --srp argument is set.
         # Pruning with SRP
         trainer.teacher_model = copy.deepcopy(trainer.model)
         trainer.model.phase = 'pruning'
@@ -211,12 +213,9 @@ def main(cfg: FairseqConfig) -> None:
         gle, gld, fc, qk, vo = _pm.get(cfg.model.pruning_stage)
 
         if gle == -1:
-            # Already setted
+            # Nodes for pruning are already set
             pass
         else:
-            # print("#"*85)
-            # print(f"* Groups to remove: GLE ({gle}) | GLD ({gld}) | FC ({fc})  | QK ({qk}) | VO ({vo})")
-            # scoring_groups(trainer.model)
             pruning_dict = {}
             pruning_dict.update(
                 _pm.get_fc_dict(trainer.model, fc)
@@ -235,15 +234,16 @@ def main(cfg: FairseqConfig) -> None:
             )
 
             _pm.pruning_dict = pruning_dict           
-            # print("#"*85)
 
         trainer.model.zero_grad()
         trainer.zero_grad()
     else:
+        # The --srp argument is unset 
         # Pruning without SRP
         logger.info(f"*** Scoring Start ***")
         trainer.model.phase = 'pruning'
         trainer.train_step(samples, scoring=True)
+        
         # Scoring groups at the beginning of every epoch
         _pm = trainer.model.pm
         gle, gld, fc, qk, vo = _pm.get()
@@ -266,53 +266,13 @@ def main(cfg: FairseqConfig) -> None:
             _pm.get_qkvo_dict(trainer.model, qk, "vo")
         )
 
-        # for k in pruning_dict:
-        #     print(k, type(pruning_dict[k]))
         _pm.pruning_dict = pruning_dict           
-        # print(_pm.pruning_dict)
-        # print("#"*85)
+        
+        # Perform instant pruning without fine-tuning
         logger.info(f"*** Pruning Strart ***")
         trainer.model.pruning()
-        # trainer.optimizer._optimizer.pruning(trainer.model)
         trainer.model.update_pos_emb_mask()
-        
-        num_params = np.sum([p.numel() for p in trainer.model.parameters() if p.requires_grad])
-        
-        param_dict = trainer.model.state_dict()
-        s = 50
-        heads = 4
-        num_layers = 6
-        emb = param_dict[f'encoder.embedding_c'].shape[0]
-        en_self_qks = [param_dict[f'encoder.layers.{l}.self_attn_qk_c'].shape[0] 
-                for l in range(num_layers)]
-        en_self_vos = [param_dict[f'encoder.layers.{l}.self_attn_vo_c'].shape[0]
-                for l in range(num_layers)]
-        en_fcs = [param_dict[f'encoder.layers.{l}.fc_c'].shape[0] for l in range(num_layers)]
-
-        de_self_qks = [param_dict[f'decoder.layers.{l}.self_attn_qk_c'].shape[0] \
-                for l in range(num_layers)]
-        de_self_vos = [param_dict[f'decoder.layers.{l}.self_attn_vo_c'].shape[0] \
-                for l in range(num_layers)]
-        de_encoder_qks = [param_dict[f'decoder.layers.{l}.encoder_attn_qk_c'].shape[0] \
-                for l in range(num_layers)]
-        de_encoder_vos = [param_dict[f'decoder.layers.{l}.encoder_attn_vo_c'].shape[0] \
-                for l in range(num_layers)]
-        de_fcs = [param_dict[f'decoder.layers.{l}.fc_c'].shape[0] for l in range(num_layers)]
-
-        tar_dict_size = 6632
-
-        fl_counter = FLOPS_COUNTER(s, emb, heads,
-                    en_self_qks, en_self_vos, en_fcs,
-                    de_self_qks, de_self_vos, de_fcs,
-                    de_encoder_qks, de_encoder_vos,
-                    tar_dict_size)
-        print("\n=======================================================")
-        num_groups = trainer.model.get_num_groups()
-        print(num_groups)
-        print(f"**  Num params after pruning: {num_params/1000000:.3f}M")
-        print(f"**  Num FLOPS after pruing: {fl_counter.get_model_flops()/1e9:.3f}")
-        print("=======================================================\n")
-
+         
         trainer.train_step(samples, scoring=True)
         trainer.model.zero_grad()
         trainer.zero_grad()
@@ -322,32 +282,25 @@ def main(cfg: FairseqConfig) -> None:
             fix_batches_to_gpus=cfg.distributed_training.fix_batches_to_gpus,
             shuffle=(epoch_itr.next_epoch_idx > cfg.dataset.curriculum),
         )
-
+        
         checkpoint_utils.save_checkpoint(
             cfg.checkpoint, trainer, epoch_itr, None
         )
         print("Save pruned model")
         return
     
-
-
-    # phase: 'warming-up', 'pruning' or 'fine-tuning'
-    # setattr(trainer.model, 'phase', 'warming-up')
     pruning_count = 0
-    #########################################################
 
     is_first_epoch = True
     while epoch_itr.next_epoch_idx <= max_epoch:
-        # Determine phase and performe pruning
-        print(trainer.model.encoder.embedding_c[0:20])
-        
+        # Determine phase and performe pruning        
         if is_first_epoch:
             _epoch = epoch_itr.epoch
             is_first_epoch = False
         else:   
             _epoch = epoch_itr.epoch + 1
-
         _phase, do_pruning = trainer.model.pm.get_phase(_epoch)
+
         logger.info(f"Epoch {_epoch} | phase: {_phase}")
         setattr(trainer.model, 'phase', _phase)
         
@@ -361,36 +314,26 @@ def main(cfg: FairseqConfig) -> None:
                 f"(--stop-min-lr={cfg.optimization.stop_min_lr})"
             )
             break
-        # print("* Current embedding_c: ",  trainer.model.decoder.embedding_c)
-        # train for one epoch
+       
+       # train for one epoch
         valid_losses, should_stop = train(cfg, trainer, task, epoch_itr,
                                           do_pruning=do_pruning)
-        # print("* After training an epoch: ", epoch_itr.epoch)
-        # Check pruning target
         _params = np.sum([_p.numel() for _n, _p in trainer.model.named_parameters()
                           if _n[-2:] != '_c'])
         num_groups = trainer.model.get_num_groups()
         num_groups = [str(_num) for _num in num_groups]
         
-        ##################### SPT  Pruning ##########################
-        # print pruning status        
+        # print and save training status        
         _res = f'{_phase[0]},{epoch_itr.epoch},'
         _res+= ','.join(num_groups) + ','
-        # _group_res = group_report(trainer.model, gl_dict)
-        # _res += _group_res
         _res += f'{_params},{valid_losses[0]}'
-        # print("+"*15, '  Test ', '+'*15)
         logger.info(_res)
         _path_list = cfg.checkpoint.save_dir.split('/')
         _res_file = f'../checkpoints/res_files/{_path_list[-1]}.csv'
         logger.info(f"Result file: {_res_file}")
-        # print("+"*15, '  Test ', '+'*15)
         with open(_res_file, 'a') as f:
             f.write(_res + '\n')
         
-        # Save pruning status (param/ bleu/ groups change)
-        ##############################################################
-
         if should_stop:
             break
 
@@ -515,18 +458,15 @@ def train(
     num_updates = trainer.get_num_updates()
     logger.info("Start iterating over samples")
 
-    ################### SPT #####################
-    _decreasing = cfg.model.decreasing
+    _decreasing = cfg.model.decreasing # decreasing type
     _pm = trainer.model.pm
 
-    # Comment this for testing
-    
+    # Comment this for testing 
     if trainer.model.phase == 'pruning':
         # Epoch-wise decreasing
         if _decreasing[0] == 'e':
             trainer.model.decrease_c()
     
-    ################################################
     for i, samples in enumerate(progress):
         if _decreasing[0] == 's':
             if trainer.model.phase == 'pruning':
@@ -536,7 +476,7 @@ def train(
         ):
             log_output = trainer.train_step(samples, scoring=False)
 
-        if log_output is not None:  # not OOM, overflow, ...
+        if log_output is not None:  
             # log mid-epoch stats
             num_updates = trainer.get_num_updates()
             if num_updates % cfg.common.log_interval == 0:
@@ -549,14 +489,14 @@ def train(
 
         end_of_epoch = not itr.has_next()
 
-        ####################### Perform Pruning #############################
+        # Perform Pruning
         if end_of_epoch and do_pruning:
             logger.info(f"*** Perform pruning ***")
             trainer.model.pruning()
             trainer.optimizer._optimizer.pruning(trainer.model)
             if trainer.model.cfg.pruning_stage != 2:
                 trainer.model.update_pos_emb_mask()
-        ####################################################################
+        
 
         valid_losses, should_stop = validate_and_save(
             cfg, trainer, task, epoch_itr, valid_subsets, end_of_epoch

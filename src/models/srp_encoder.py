@@ -1,7 +1,18 @@
-# Copyright (c) Facebook, Inc. and its affiliates.
+################################################################################
+# Starlab Transformer Compression with SRP (Selectively Regularized Pruning)
 #
-# This source code is licensed under the MIT license found in the
-# LICENSE file in the root directory of this source tree.
+# Author: Hyojin Jeon (tarahjjeon@snu.ac.kr), Seoul National University
+#         U Kang (ukang@snu.ac.kr), Seoul National University
+#
+# Version : 1.0
+# Date : Nov 29, 2022
+# Main Contact: Hyojin Jeon
+#
+# This software is free of charge under research purposes.
+# For commercial purposes, please contact the authors.
+# This code is mainly based on the [GitHub Repository]
+# [GitHub Repository]: https://github.com/facebookresearch/fairseq
+################################################################################
 
 import math
 from typing import Dict, List, Optional
@@ -17,25 +28,25 @@ from fairseq.modules import (
     PositionalEmbedding,
     SinusoidalPositionalEmbedding,
 )
-from ..modules import spt_layer, LayerNorm
+from ..modules import srp_layer, LayerNorm
 from fairseq.modules.checkpoint_activations import checkpoint_wrapper
 from fairseq.modules.quant_noise import quant_noise as apply_quant_noise_
 from torch import Tensor
-from .spt_config import SPTConfig
+from .srp_config import SRPConfig
 
 
 # rewrite name for backward compatibility in `make_generation_fast_`
 def module_name_fordropout(module_name: str) -> str:
-    if module_name == "SPTEncoderBase":
-        return "SPTEncoder"
+    if module_name == "SRPEncoderBase":
+        return "SRPEncoder"
     else:
         return module_name
 
 
-class SPTEncoderBase(FairseqEncoder):
+class SRPEncoderBase(FairseqEncoder):
     """
-    SPT encoder consisting of *cfg.encoder.layers* layers. Each layer
-    is a :class:`SPTEncoderLayer`.
+    SRP encoder consisting of *cfg.encoder.layers* layers. Each layer
+    is a :class:`SRPEncoderLayer`.
 
     Args:
         args (argparse.Namespace): parsed command-line arguments
@@ -73,10 +84,8 @@ class SPTEncoderBase(FairseqEncoder):
             else None
         )
 
-        #######################################################
         self.embedding_c = nn.Parameter(torch.ones(embed_dim), requires_grad=True)
         self.pos_emb_mask = nn.Parameter(torch.zeros(0), requires_grad=False)
-        #######################################################
 
         if cfg.layernorm_embedding:
             self.layernorm_embedding = LayerNorm(embed_dim, export=cfg.export)
@@ -109,7 +118,7 @@ class SPTEncoderBase(FairseqEncoder):
         """
 
     def build_encoder_layer(self, cfg):
-        layer = spt_layer.SPTEncoderLayerBase(
+        layer = srp_layer.SRPEncoderLayerBase(
             cfg, return_fc=self.return_fc
         )
         checkpoint = cfg.checkpoint_activations
@@ -217,10 +226,8 @@ class SPTEncoderBase(FairseqEncoder):
 
         x, encoder_embedding = self.forward_embedding(src_tokens, token_embeddings)
 
-        ############## For SPT #######################
         if compute_c:
             x = x * self.embedding_c
-        ##############################################
 
         # account for padding while computing the representation
         if has_pads:
@@ -402,11 +409,11 @@ class SPTEncoderBase(FairseqEncoder):
         return state_dict
 
 
-class SPTEncoder(SPTEncoderBase):
+class SRPEncoder(SRPEncoderBase):
     def __init__(self, args, dictionary, embed_tokens, return_fc=False):
         self.args = args
         super().__init__(
-            SPTConfig.from_namespace(args),
+            SRPConfig.from_namespace(args),
             dictionary,
             embed_tokens,
             return_fc=return_fc,
@@ -414,5 +421,5 @@ class SPTEncoder(SPTEncoderBase):
 
     def build_encoder_layer(self, args):
         return super().build_encoder_layer(
-            SPTConfig.from_namespace(args),
+            SRPConfig.from_namespace(args),
         )

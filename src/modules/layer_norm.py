@@ -1,7 +1,18 @@
-# Copyright (c) Facebook, Inc. and its affiliates.
+################################################################################
+# Starlab Transformer Compression with SRP (Selectively Regularized Pruning)
 #
-# This source code is licensed under the MIT license found in the
-# LICENSE file in the root directory of this source tree.
+# Author: Hyojin Jeon (tarahjjeon@snu.ac.kr), Seoul National University
+#         U Kang (ukang@snu.ac.kr), Seoul National University
+#
+# Version : 1.0
+# Date : Nov 29, 2022
+# Main Contact: Hyojin Jeon
+#
+# This software is free of charge under research purposes.
+# For commercial purposes, please contact the authors.
+# This code is mainly based on the [GitHub Repository]
+# [GitHub Repository]: https://github.com/facebookresearch/fairseq
+################################################################################
 
 import torch
 import torch.nn as nn
@@ -13,6 +24,9 @@ import numbers
 import numpy as np
 
 class CustomLayerNorm(nn.Module):
+    """
+    Weighted Layer Normalization
+    """
     __constants__ = ['normalized_shape', 'eps', 'elementwise_affine']
     normalized_shape: Tuple[int, ...]
     eps: float
@@ -66,30 +80,6 @@ class CustomLayerNorm(nn.Module):
         
         norm_emb = (x - mu) / (sigma + self.eps)
         return norm_emb * self.weight + self.bias
-
-    """
-    def forward(self, input: Tensor, embedding_c = None) -> Tensor:
-        assert len(self.normalized_shape) == 1
-        bs, l, emb_dim = input.shape
-        if embedding_c is not None:
-            _cond = (embedding_c > 1e-7)
-            c_surv = embedding_c[_cond]
-            c_sum = torch.sum(c_surv)
-            x = input[:,:,_cond]
-
-            mu = (torch.sum(x, dim = -1) / c_sum).view(bs, l, 1)
-            x_orig = (x*1/c_surv)
-
-            _sum = torch.sum( ((x_orig - mu) ** 2) * c_surv, dim=-1)
-            sigma = (torch.sqrt(_sum / c_sum)).view(bs, l, 1)    
-        else:
-            mu = (torch.sum(input, dim = -1) / emb_dim).view(bs, l, 1)
-            _sum = torch.sum((input - mu) ** 2, dim=-1)  # + (mu**2).squeeze(2) * (self.numel-emb_dim) 
-            sigma = (torch.sqrt(_sum / emb_dim)).view(bs, l, 1)    
-        
-        norm_emb = (input - mu) / (sigma + self.eps)
-        return norm_emb * self.weight + self.bias
-    """
 
     def extra_repr(self, ) -> str:
         return '{normalized_shape}, eps={eps}, '\

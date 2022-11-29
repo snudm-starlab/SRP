@@ -1,7 +1,18 @@
-# Copyright (c) Facebook, Inc. and its affiliates.
+################################################################################
+# Starlab Transformer Compression with SRP (Selectively Regularized Pruning)
 #
-# This source code is licensed under the MIT license found in the
-# LICENSE file in the root directory of this source tree.
+# Author: Hyojin Jeon (tarahjjeon@snu.ac.kr), Seoul National University
+#         U Kang (ukang@snu.ac.kr), Seoul National University
+#
+# Version : 1.0
+# Date : Nov 29, 2022
+# Main Contact: Hyojin Jeon
+#
+# This software is free of charge under research purposes.
+# For commercial purposes, please contact the authors.
+# This code is mainly based on the [GitHub Repository]
+# [GitHub Repository]: https://github.com/facebookresearch/fairseq
+################################################################################
 
 import logging
 import math
@@ -22,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class SPTAdamConfig(FairseqDataclass):
+class SRPAdamConfig(FairseqDataclass):
     adam_betas: Any = field(
         default=(0.9, 0.999), metadata={"help": "betas for Adam optimizer"}
     )
@@ -41,8 +52,8 @@ class SPTAdamConfig(FairseqDataclass):
     lr: List[float] = II("optimization.lr")
 
 
-@register_optimizer("spt_adam", dataclass=SPTAdamConfig)
-class SPTAdam(FairseqOptimizer):
+@register_optimizer("srp_adam", dataclass=SRPAdamConfig)
+class SRPAdam(FairseqOptimizer):
     """Adam optimizer for fairseq.
 
     Important note: this optimizer corresponds to the "AdamW" variant of
@@ -50,7 +61,7 @@ class SPTAdam(FairseqOptimizer):
     analogous to torch.optim.AdamW from PyTorch.
     """
 
-    def __init__(self, cfg: SPTAdamConfig, params):
+    def __init__(self, cfg: SRPAdamConfig, params):
         super().__init__(cfg)
         fused_adam_cls = get_fused_adam_class()
         use_fused_adam = (
@@ -268,13 +279,6 @@ class Adam(torch.optim.Optimizer):
             _i += 1
             _n = param_names[_i]
             _p = param_list[_i]
-            """
-            print('===================')
-            print(_n) 
-            print(_p.shape)
-            print(_v['exp_avg'].shape)
-            print('===================')
-            """
 
             if not _p.requires_grad:
                 continue
@@ -304,8 +308,6 @@ class Adam(torch.optim.Optimizer):
 
             elif 'fc' in _n:
                 # fc layers
-                # fc1: (gl_dim, fc_dim) | bias: fc_dim | global: prev_sub
-                # fc2: (fc_dim, gl_dim) | bias: fc_dim | global: prev_sub
                 ende, ly, type, wb = _parsing(_n)
 
                 # Get global and local masks
@@ -343,13 +345,7 @@ class Adam(torch.optim.Optimizer):
                         _v['exp_avg_sq'][:,global_indices] = 0.
                         _v['exp_avg_sq'][local_indices,:] = 0.
 
-            else:
-                # qkvo_proj
-                # q: (qk_dim, gl_dim) | bias: qk_dim | global: 
-                # k: (qk_dim, gl_dim) | bias: qk_dim | global: 
-                # v: (vo_dim, gl_dim) | bias: vo_dim | global: 
-                # o: (gl_dim, vo_dim) | bias: gl_dim | global: previous sub-layer ln_c
-                
+            else:                
                 ende, ly, type, wb = _parsing(_n)
                 # Get global and local masks
                 if 'self_attn' in _n:
@@ -369,10 +365,6 @@ class Adam(torch.optim.Optimizer):
                         local_key = f'{ende}.layers.{ly}.encoder_attn_qk_c'
                     else:
                         local_key = f'{ende}.layers.{ly}.encoder_attn_vo_c'
-
-                # q: (qk_dim, gl_dim) | bias: qk_dim | global: 
-                # k: (qk_dim, gl_dim) | bias: qk_dim | global: 
-                # v: (vo_dim, gl_dim) | bias: vo_dim | global: 
 
                 global_indices = pd[global_key] if global_key in pd else []
                 local_indices = pd[local_key] if local_key in pd else []
@@ -403,10 +395,6 @@ class Adam(torch.optim.Optimizer):
                         _v['exp_avg'][local_indices,:] = 0.
                         _v['exp_avg_sq'][:,global_indices] = 0.
                         _v['exp_avg_sq'][local_indices,:] = 0.
-
-        # self.state = _dict
-        
-
 
     def pruning(self, _model):
         pm = _model.pm
@@ -439,7 +427,6 @@ class Adam(torch.optim.Optimizer):
         for _k, _v in self.state.items():
             _n = param_names[_i]
             _shape = _v['exp_avg'].shape
-            # print("*** ", _n, ": ", _shape)
             if _n[-2:] == "_c" :
                 continue
             elif 'embed_tokens' in _n:
@@ -467,8 +454,6 @@ class Adam(torch.optim.Optimizer):
 
             elif 'fc' in _n:
                 # fc layers
-                # fc1: (gl_dim, fc_dim) | bias: fc_dim | global: prev_sub
-                # fc2: (fc_dim, gl_dim) | bias: fc_dim | global: prev_sub
                 ende, ly, type, wb = _parsing(_n)
 
                 # Get global and local masks
@@ -500,10 +485,6 @@ class Adam(torch.optim.Optimizer):
                         _v['exp_avg_sq'] = _v['exp_avg_sq'][local_mask,:][:,global_mask]
             else:
                 # qkvo_proj
-                # q: (qk_dim, gl_dim) | bias: qk_dim | global: 
-                # k: (qk_dim, gl_dim) | bias: qk_dim | global: 
-                # v: (vo_dim, gl_dim) | bias: vo_dim | global: 
-                # o: (gl_dim, vo_dim) | bias: gl_dim | global: previous sub-layer ln_c
                 
                 ende, ly, type, wb = _parsing(_n)
                 # Get global and local masks
@@ -524,10 +505,6 @@ class Adam(torch.optim.Optimizer):
                         local_key = f'{ende}.layers.{ly}.encoder_attn_qk_c'
                     else:
                         local_key = f'{ende}.layers.{ly}.encoder_attn_vo_c'
-
-                # q: (qk_dim, gl_dim) | bias: qk_dim | global: 
-                # k: (qk_dim, gl_dim) | bias: qk_dim | global: 
-                # v: (vo_dim, gl_dim) | bias: vo_dim | global: 
 
                 global_indices = pd[global_key] if global_key in pd else []
                 local_indices = pd[local_key] if local_key in pd else []

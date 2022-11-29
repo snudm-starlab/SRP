@@ -1,7 +1,18 @@
-# Copyright (c) Facebook, Inc. and its affiliates.
+################################################################################
+# Starlab Transformer Compression with SRP (Selectively Regularized Pruning)
 #
-# This source code is licensed under the MIT license found in the
-# LICENSE file in the root directory of this source tree.
+# Author: Hyojin Jeon (tarahjjeon@snu.ac.kr), Seoul National University
+#         U Kang (ukang@snu.ac.kr), Seoul National University
+#
+# Version : 1.0
+# Date : Nov 29, 2022
+# Main Contact: Hyojin Jeon
+#
+# This software is free of charge under research purposes.
+# For commercial purposes, please contact the authors.
+# This code is mainly based on the [GitHub Repository]
+# [GitHub Repository]: https://github.com/facebookresearch/fairseq
+################################################################################
 
 from typing import Dict, List, Optional
 
@@ -12,10 +23,10 @@ from . import MultiheadAttention, LayerNorm
 from fairseq.modules.fairseq_dropout import FairseqDropout
 from fairseq.modules.quant_noise import quant_noise
 from torch import Tensor
-from ..models.spt_config import SPTConfig
+from ..models.srp_config import SRPConfig
 
 
-class SPTEncoderLayerBase(nn.Module):
+class SRPEncoderLayerBase(nn.Module):
     """Encoder layer block.
 
     In the original paper each operation (multi-head attention or FFN) is
@@ -44,9 +55,7 @@ class SPTEncoderLayerBase(nn.Module):
         )
         self.activation_fn = utils.get_activation_fn(activation=cfg.activation_fn)
         activation_dropout_p = cfg.activation_dropout
-        ############################ SRP ########################################
         self.do_weighted = cfg.weighted_layernorm
-        #########################################################################
 
 
         if activation_dropout_p == 0:
@@ -71,12 +80,10 @@ class SPTEncoderLayerBase(nn.Module):
 
         self.final_layer_norm = LayerNorm(self.embed_dim, export=cfg.export)
         
-        ###################### Connectivity Parameter ##########################
         self.self_attn_qk_c = torch.nn.Parameter(torch.ones(self.embed_dim))
         self.self_attn_vo_c = torch.nn.Parameter(torch.ones(self.embed_dim))
 
         self.fc_c = torch.nn.Parameter(torch.ones(cfg.encoder.ffn_embed_dim))
-        ########################################################################
 
     def build_fc1(self, input_dim, output_dim, q_noise, qn_block_size):
         return quant_noise(
@@ -203,8 +210,6 @@ class SPTEncoderLayerBase(nn.Module):
             x = self.dropout_module(x)
 
             if compute_c:
-                # W_O C_emb
-                # x *= embedding_c # fixed: Moved into the layer norm
                 x = self.residual_connection(x, residual)
                 x = self.self_attn_layer_norm(x, embedding_c=embedding_c,
                                              weighted = self.do_weighted)
@@ -229,7 +234,6 @@ class SPTEncoderLayerBase(nn.Module):
 
             x = self.dropout_module(x)
             if compute_c:
-                # x *= embedding_c # fixed: Moved into the layer norm
                 x = self.residual_connection(x, residual)
                 x = self.final_layer_norm(x, embedding_c=embedding_c,
                                           weighted = self.do_weighted)
@@ -246,18 +250,18 @@ class SPTEncoderLayerBase(nn.Module):
 
 
 # backward compatible with the legacy argparse format
-class SPTEncoderLayer(SPTEncoderLayerBase):
+class SRPEncoderLayer(SRPEncoderLayerBase):
     def __init__(self, args):
-        super().__init__(SPTConfig.from_namespace(args))
+        super().__init__(SRPConfig.from_namespace(args))
         self.args = args
 
     def build_self_attention(self, embed_dim, args):
         return super().build_self_attention(
-            embed_dim, SPTConfig.from_namespace(args)
+            embed_dim, SRPConfig.from_namespace(args)
         )
 
 
-class SPTDecoderLayerBase(nn.Module):
+class SRPDecoderLayerBase(nn.Module):
     """Decoder layer block.
 
     In the original paper each operation (multi-head attention, encoder
@@ -290,9 +294,7 @@ class SPTDecoderLayerBase(nn.Module):
         self.quant_noise_block_size = cfg.quant_noise.pq_block_size
 
         self.cross_self_attention = cfg.cross_self_attention
-        ############################ SRP ########################################
         self.do_weighted = cfg.weighted_layernorm
-        #########################################################################
 
         self.self_attn = self.build_self_attention(
             self.embed_dim,
@@ -355,13 +357,11 @@ class SPTDecoderLayerBase(nn.Module):
         self.need_attn = True
 
         self.onnx_trace = False
-        ###################### Connectivity Parameter ##########################
         self.self_attn_qk_c = torch.nn.Parameter(torch.ones(self.embed_dim))
         self.self_attn_vo_c = torch.nn.Parameter(torch.ones(self.embed_dim))
         self.encoder_attn_qk_c = torch.nn.Parameter(torch.ones(self.embed_dim))
         self.encoder_attn_vo_c = torch.nn.Parameter(torch.ones(self.embed_dim))
         self.fc_c = torch.nn.Parameter(torch.ones(cfg.encoder.ffn_embed_dim))
-        ########################################################################
 
     def build_fc1(self, input_dim, output_dim, q_noise, qn_block_size):
         return quant_noise(nn.Linear(input_dim, output_dim), q_noise, qn_block_size)
@@ -526,7 +526,6 @@ class SPTDecoderLayerBase(nn.Module):
 
             x = self.dropout_module(x)
             if compute_c:
-                # x *= embedding_c # fixed: Moved into the layer norm
                 x = self.residual_connection(x, residual)
                 x = self.self_attn_layer_norm(x, embedding_c=embedding_c,
                                              weighted = self.do_weighted)
@@ -583,7 +582,6 @@ class SPTDecoderLayerBase(nn.Module):
 
                 x = self.dropout_module(x)
                 if compute_c:
-                    # x *= embedding_c # fixed: Moved into the layer norm
                     x = self.residual_connection(x, residual)
                     x = self.encoder_attn_layer_norm(x, embedding_c=embedding_c,
                                                     weighted = self.do_weighted)
@@ -604,13 +602,10 @@ class SPTDecoderLayerBase(nn.Module):
             if compute_c:
                 x = x * self.fc_c
 
-            # if self.ffn_layernorm is not None:
-            #     x = self.ffn_layernorm(x)
             x = self.fc2(x)
             hidden_states['fc'] = x
             x = self.dropout_module_fc2(x)
             if compute_c:
-                # x *= embedding_c # fixed: Moved into the layer norm
                 x = self.residual_connection(x, residual)
                 x = self.final_layer_norm(x, embedding_c=embedding_c,
                                           weighted = self.do_weighted)
@@ -641,12 +636,12 @@ class SPTDecoderLayerBase(nn.Module):
 
 
 # backward compatible with the legacy argparse format
-class SPTDecoderLayer(SPTDecoderLayerBase):
+class SRPDecoderLayer(SRPDecoderLayerBase):
     def __init__(
         self, args, no_encoder_attn=False, add_bias_kv=False, add_zero_attn=False
     ):
         super().__init__(
-            SPTConfig.from_namespace(args),
+            SRPConfig.from_namespace(args),
             no_encoder_attn=no_encoder_attn,
             add_bias_kv=add_bias_kv,
             add_zero_attn=add_zero_attn,
@@ -658,7 +653,7 @@ class SPTDecoderLayer(SPTDecoderLayerBase):
     ):
         return super().build_self_attention(
             embed_dim,
-            SPTConfig.from_namespace(args),
+            SRPConfig.from_namespace(args),
             add_bias_kv=add_bias_kv,
             add_zero_attn=add_zero_attn,
         )
@@ -666,5 +661,5 @@ class SPTDecoderLayer(SPTDecoderLayerBase):
     def build_encoder_attention(self, embed_dim, args):
         return super().build_encoder_attention(
             embed_dim,
-            SPTConfig.from_namespace(args),
+            SRPConfig.from_namespace(args),
         )

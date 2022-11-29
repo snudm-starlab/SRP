@@ -1,7 +1,19 @@
-# Copyright (c) Facebook, Inc. and its affiliates.
+################################################################################
+# Starlab Transformer Compression with SRP (Selectively Regularized Pruning)
 #
-# This source code is licensed under the MIT license found in the
-# LICENSE file in the root directory of this source tree.
+# Author: Hyojin Jeon (tarahjjeon@snu.ac.kr), Seoul National University
+#         Seungcheol Park (ant6si@snu.ac.kr), Seoul National University
+#         U Kang (ukang@snu.ac.kr), Seoul National University
+#
+# Version : 1.0
+# Date : Nov 29, 2022
+# Main Contact: Hyojin Jeon
+#
+# This software is free of charge under research purposes.
+# For commercial purposes, please contact the authors.
+# This code is mainly based on the [GitHub Repository]
+# [GitHub Repository]: https://github.com/facebookresearch/fairseq
+################################################################################
 
 from dataclasses import dataclass, field
 import itertools
@@ -173,7 +185,7 @@ def load_langpair_dataset(
 
 
 @dataclass
-class SPTTranslationConfig(FairseqDataclass):
+class SRPTranslationConfig(FairseqDataclass):
     data: Optional[str] = field(
         default=None,
         metadata={
@@ -265,8 +277,8 @@ class SPTTranslationConfig(FairseqDataclass):
         default=False, metadata={"help": "print sample generations during validation"}
     )
 
-@register_task("SPTtranslation", dataclass=SPTTranslationConfig)
-class SPTTranslationTask(FairseqTask):
+@register_task("SRPtranslation", dataclass=SRPTranslationConfig)
+class SRPTranslationTask(FairseqTask):
     """
     Translate from one (source) language to another (target) language.
 
@@ -280,15 +292,15 @@ class SPTTranslationTask(FairseqTask):
         :mod:`fairseq-generate` and :mod:`fairseq-interactive`.
     """
 
-    cfg: SPTTranslationConfig
+    cfg: SRPTranslationConfig
 
-    def __init__(self, cfg: SPTTranslationConfig, src_dict, tgt_dict):
+    def __init__(self, cfg: SRPTranslationConfig, src_dict, tgt_dict):
         super().__init__(cfg)
         self.src_dict = src_dict
         self.tgt_dict = tgt_dict
 
     @classmethod
-    def setup_task(cls, cfg: SPTTranslationConfig, **kwargs):
+    def setup_task(cls, cfg: SRPTranslationConfig, **kwargs):
         """Setup the task (e.g., load dictionaries).
 
         Args:

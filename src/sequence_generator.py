@@ -1,7 +1,21 @@
-# Copyright (c) Facebook, Inc. and its affiliates.
+################################################################################
+# Starlab Transformer Compression with SRP (Selectively Regularized Pruning)
 #
-# This source code is licensed under the MIT license found in the
-# LICENSE file in the root directory of this source tree.
+# Author: Hyojin Jeon (tarahjjeon@snu.ac.kr), Seoul National University
+#         U Kang (ukang@snu.ac.kr), Seoul National University
+#
+# Version : 1.0
+# Date : Nov 29, 2022
+# Main Contact: Hyojin Jeon
+#
+# This software is free of charge under research purposes.
+# For commercial purposes, please contact the authors.
+# This code is mainly based on the [GitHub Repository]
+# [GitHub Repository]: https://github.com/facebookresearch/fairseq
+################################################################################
+"""
+Codes for generating sequences
+"""
 
 import math
 import sys
@@ -782,7 +796,6 @@ class EnsembleModel(nn.Module):
         if not self.has_encoder():
             return None
 
-        ##################### FOR SRP #####################################
         def _forward_encoder(model, net_input):
             is_srp = hasattr(model, 'pm')
             if is_srp: #SRP
@@ -790,7 +803,6 @@ class EnsembleModel(nn.Module):
                 return model.encoder.forward_torchscript(net_input, compute_c=compute_c)
             else:
                 return model.encoder.forward_torchscript(net_input)
-        ###################################################################
 
         return [_forward_encoder(model, net_input) for model in self.models]
 
@@ -806,15 +818,12 @@ class EnsembleModel(nn.Module):
         avg_attn: Optional[Tensor] = None
         encoder_out: Optional[Dict[str, List[Tensor]]] = None
         for i, model in enumerate(self.models):
-            ############################ For SRP #########################
             is_srp = hasattr(model, 'pm')
             if is_srp:
                 # Model is SRP
                 compute_c = (model.phase=='pruning')
             else:
                 compute_c = False
-            ##############################################################
-
 
             if self.has_encoder():
                 encoder_out = encoder_outs[i]

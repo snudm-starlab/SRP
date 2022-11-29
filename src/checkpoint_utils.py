@@ -1,7 +1,23 @@
-# Copyright (c) Facebook, Inc. and its affiliates.
+################################################################################
+# Starlab Transformer Compression with SRP (Selectively Regularized Pruning)
 #
-# This source code is licensed under the MIT license found in the
-# LICENSE file in the root directory of this source tree.
+# Author: Hyojin Jeon (tarahjjeon@snu.ac.kr), Seoul National University
+#         U Kang (ukang@snu.ac.kr), Seoul National University
+#
+# Version : 1.0
+# Date : Nov 29, 2022
+# Main Contact: Hyojin Jeon
+#
+# This software is free of charge under research purposes.
+# For commercial purposes, please contact the authors.
+# This code is mainly based on the [GitHub Repository]
+# [GitHub Repository]: https://github.com/facebookresearch/fairseq
+################################################################################
+
+"""
+Codes for saving and loading checkpoints
+"""
+
 
 import ast
 import collections
@@ -34,6 +50,7 @@ logger = logging.getLogger(__name__)
 
 
 def save_checkpoint(cfg: CheckpointConfig, trainer, epoch_itr, val_loss):
+    # Save a checkpoint file
     from fairseq import meters
 
     # only one worker should attempt to create the required dir
@@ -282,7 +299,6 @@ def load_checkpoint(cfg: CheckpointConfig, trainer, **passthrough_args):
 
     return extra_state, epoch_itr
 
-#################### For load SPT ################################
 
 def set_param(_model, _name, new_param):
     _attrs = _name.split('.')
@@ -298,33 +314,24 @@ def get_param(_model, _name):
         _parent = getattr(_parent, _attr)
     return getattr(_parent, _attrs[-1])
 
-def load_spt(filename, model):
+def load_srp(filename, model):
     """
-    Initialize SPT model weights
+    Initialize SRP model weights
     *passthrough_args* will be passed through to
     ``trainer.get_train_iterator``.
     """
-    # print("Load Check point start!!")
     load_model_state = load_checkpoint_to_cpu(
         filename, load_on_all_ranks=False
         )["model"]	
-    """
-    pretrained_dict = {k: v for k,v in state["model"].items() 
-         if k in trainer.model.state_dict()}
-    """	
     _dev= None
     for _n, _p in model.named_parameters():
         _c_param = load_model_state[_n]
-        # print("* ", _n)
-        # print("- Param update: ", model.state_dict()[_n].shape, end=' ==> ')
         if 'embed_tokens' in _n:
             set_param(model, _n, nn.Parameter(_c_param.data))
-            # print(model.state_dict()[_n].shape)
             if 'decoder.embed_tokens' in _n:
                 model.decoder.output_projection.weight = model.decoder.embed_tokens.weight
             continue
         elif 'output_projection' in _n:
-            # print(model.state_dict()[_n].shape)
             continue
 
         if not _dev:
@@ -344,18 +351,8 @@ def load_spt(filename, model):
                 _fc.in_features = _in
                 _fc.out_features = _out 
         new_param = model.state_dict()[_n]
-        # print(new_param.shape,)
-        # print()
     model.to(_dev)
-    """
-    for _n, _p in model.named_parameters():
-        _c_param = load_model_state[_n]
-        if torch.sum(_c_param != _p) != 0:
-    """
-
     return model
-
-################## SPT initialization Ends ############################
 
 def load_checkpoint_to_cpu(path, arg_overrides=None, load_on_all_ranks=False):
     """Loads a checkpoint to CPU (with upgrading for backward compatibility).
@@ -536,9 +533,7 @@ def load_model_ensemble_and_task(
                         model.set_num_updates(
                             state["optimizer_history"][-1]["num_updates"]
                         )
-                    ###################### For TEST ########################
-                    model = load_spt(filename, model)
-                    ########################################################
+                    model = load_srp(filename, model)
                     model.load_state_dict(
                         consolidated_model_state, strict=strict, model_cfg=cfg.model
                     )
@@ -557,20 +552,14 @@ def load_model_ensemble_and_task(
                     and "num_updates" in state["optimizer_history"][-1]
                 ):
                     model.set_num_updates(state["optimizer_history"][-1]["num_updates"])
-                ######################### SPT TEST ######################
-                model = load_spt(filename, model)
-                #########################################################
+                model = load_srp(filename, model)
                 model.load_state_dict(
                     state["model"], strict=strict, model_cfg=cfg.model
                 )
 
-            #################### For SPT ###########################
             if 'extra_state' in state:
-                # print("HELLO##########33 Extra-state")
                 if 'pruning_manager' in state['extra_state']:
-                    # print("HELLO########## Pruning_manager")
                     model.pm = state['extra_state']['pruning_manager'] 
-            ########################################################
 
             # reset state so it gets loaded for the next model in ensemble
             state = None

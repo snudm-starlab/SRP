@@ -1,17 +1,27 @@
-# Copyright (c) Facebook, Inc. and its affiliates.
+################################################################################
+# Starlab Transformer Compression with SRP (Selectively Regularized Pruning)
 #
-# This source code is licensed under the MIT license found in the
-# LICENSE file in the root directory of this source tree.
-"""isort:skip_file"""
+# Author: Hyojin Jeon (tarahjjeon@snu.ac.kr), Seoul National University
+#         U Kang (ukang@snu.ac.kr), Seoul National University
+#
+# Version : 1.0
+# Date : Nov 29, 2022
+# Main Contact: Hyojin Jeon
+#
+# This software is free of charge under research purposes.
+# For commercial purposes, please contact the authors.
+# This code is mainly based on the [GitHub Repository]
+# [GitHub Repository]: https://github.com/facebookresearch/fairseq
+################################################################################
 
 from .layer_norm import Fp32LayerNorm, LayerNorm
 from .multihead_attention import MultiheadAttention
-from .spt_layer import SPTDecoderLayer, SPTEncoderLayer
+from .srp_layer import SRPDecoderLayer, SRPEncoderLayer
 
 __all__ = [
     "Fp32LayerNorm",
     "LayerNorm",
     "MultiheadAttention",
-    "SPTDecoderLayer",
-    "SPTEncoderLayer",
+    "SRPDecoderLayer",
+    "SRPEncoderLayer",
 ]

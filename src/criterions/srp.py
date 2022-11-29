@@ -1,7 +1,19 @@
-# Copyright (c) Facebook, Inc. and its affiliates.
+################################################################################
+# Starlab Transformer Compression with SRP (Selectively Regularized Pruning)
 #
-# This source code is licensed under the MIT license found in the
-# LICENSE file in the root directory of this source tree.
+# Author: Hyojin Jeon (tarahjjeon@snu.ac.kr), Seoul National University
+#         Seungcheol Park (ant6si@snu.ac.kr), Seoul National University
+#         U Kang (ukang@snu.ac.kr), Seoul National University
+#
+# Version : 1.0
+# Date : Nov 29, 2022
+# Main Contact: Hyojin Jeon
+#
+# This software is free of charge under research purposes.
+# For commercial purposes, please contact the authors.
+# This code is mainly based on the [GitHub Repository]
+# [GitHub Repository]: https://github.com/facebookresearch/fairseq
+################################################################################
 
 import math
 from dataclasses import dataclass, field
@@ -16,7 +28,7 @@ import torch.nn.functional as F
 
 
 @dataclass
-class SPTCriterionConfig(FairseqDataclass):
+class SRPCriterionConfig(FairseqDataclass):
     label_smoothing: float = field(
         default=0.0,
         metadata={"help": "epsilon for label smoothing, 0 means no label smoothing"},
@@ -52,9 +64,9 @@ def label_smoothed_nll_loss(lprobs, target, epsilon, ignore_index=None, reduce=T
 
 
 @register_criterion(
-    "spt", dataclass=SPTCriterionConfig
+    "srp", dataclass=SRPCriterionConfig
 )
-class SPTCriterion(FairseqCriterion):
+class SRPCriterion(FairseqCriterion):
     def __init__(
         self,
         task,
@@ -84,6 +96,7 @@ class SPTCriterion(FairseqCriterion):
         3) logging outputs to display while training
         """
         if teacher_model is not None:
+            # Use KD
             sample["net_input"]["use_kd"] = True
             with torch.no_grad():
                 teacher_output, teacher_states = teacher_model(**sample["net_input"])
@@ -98,29 +111,10 @@ class SPTCriterion(FairseqCriterion):
         )
 
         if teacher_model is not None:
-            """
-            # Attention KD
-            attn_kd_loss = torch.zeros_like(loss)
-            for l in range(model.cfg.encoder_layers):
-                for attn_name in ['encoder.self_attn', 
-                                  'decoder.self_attn', 
-                                  'decoder.encoder_attn']:
-                    ts = teacher_states[f"{attn_name}.{l}"]
-                    ss = student_states[f"{attn_name}.{l}"]
-                    attn_ks_loss = attn_kd_loss + torch.mean((ts-ss) **2 )
-
-            loss += attn_kd_loss * model.cfg.attn_kd
-            """
-            # print("********* T: ", model.cfg.T)
-            # print("********* teacher_logits: ", teacher_output[0].shape)
-            # print("********* student_logtis: ", net_output[0].shape)
             prob_kd = self.prob_kd_loss(student_logits=net_output[0], 
                                         teacher_logits=teacher_output[0],
                                         T=model.cfg.T)
-            # print(f"*** prob_kd: {prob_kd.item()} | loss: {loss.item()} | nll: {nll_loss.item()}")  
-            # loss = loss * (1-model.cfg.prob_kd) + prob_kd * (model.cfg.prob_kd)
             loss = loss + prob_kd * (model.cfg.prob_kd)
-            # loss = loss * 0. + prob_kd
         logging_output = {
             "loss": loss.data,
             "nll_loss": nll_loss.data,

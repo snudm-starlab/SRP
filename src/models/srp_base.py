@@ -1,7 +1,18 @@
-# Copyright (c) Facebook, Inc. and its affiliates.
+################################################################################
+# Starlab Transformer Compression with SRP (Selectively Regularized Pruning)
 #
-# This source code is licensed under the MIT license found in the
-# LICENSE file in the root directory of this source tree.
+# Author: Hyojin Jeon (tarahjjeon@snu.ac.kr), Seoul National University
+#         U Kang (ukang@snu.ac.kr), Seoul National University
+#
+# Version : 1.0
+# Date : Nov 29, 2022
+# Main Contact: Hyojin Jeon
+#
+# This software is free of charge under research purposes.
+# For commercial purposes, please contact the authors.
+# This code is mainly based on the [GitHub Repository]
+# [GitHub Repository]: https://github.com/facebookresearch/fairseq
+################################################################################
 
 from typing import Dict, List, Optional, Tuple
 import numpy as np
@@ -14,33 +25,24 @@ from fairseq.dataclass.utils import gen_parser_from_dataclass
 from fairseq.distributed import fsdp_wrap
 from fairseq.models import FairseqEncoderDecoderModel
 
-from .spt_config import SPTConfig
-from .spt_encoder import SPTEncoderBase
-from .spt_decoder import SPTDecoderBase
+from .srp_config import SRPConfig
+from .srp_encoder import SRPEncoderBase
+from .srp_decoder import SRPDecoderBase
 
-"""
-from . import (
-    SPTConfig,
-    SPTDecoderBase,
-    SPTEncoderBase,
-)
-"""
-
-
-class SPTModelBase(FairseqEncoderDecoderModel):
+class SRPModelBase(FairseqEncoderDecoderModel):
     """
-    SPT model from `"Attention Is All You Need" (Vaswani, et al, 2017)
+    SRP model based on `"Attention Is All You Need" (Vaswani, et al, 2017)
     <https://arxiv.org/abs/1706.03762>`_.
 
     Args:
-        encoder (SPTEncoder): the encoder
-        decoder (SPTDecoder): the decoder
+        encoder (SRPEncoder): the encoder
+        decoder (SRPDecoder): the decoder
 
-    The SPT model provides the following named architectures and
+    The SRP model provides the following named architectures and
     command-line arguments:
 
     .. argparse::
-        :ref: fairseq.models.spt_parser
+        :ref: fairseq.models.srp_parser
         :prog:
     """
 
@@ -49,20 +51,18 @@ class SPTModelBase(FairseqEncoderDecoderModel):
         self.cfg = cfg
         self.supports_align_args = True
 
-        ############## Pruning Manager For SPT ###############
         _src_words = encoder.embed_tokens.weight.shape[0]
         _tar_words = decoder.embed_tokens.weight.shape[0]
         self.pm = PruningManager(cfg, _src_words, _tar_words)
         self.update_pos_emb_mask() # initialize embedding_mask
         self.phase = 'warming-up'
-        ######################################################
 
     @classmethod
     def add_args(cls, parser):
         """Add model-specific arguments to the parser."""
         # we want to build the args recursively in this case.
         gen_parser_from_dataclass(
-            parser, SPTConfig(), delete_default=False, with_prefix=""
+            parser, SRPConfig(), delete_default=False, with_prefix=""
         )
 
     @classmethod
@@ -127,11 +127,11 @@ class SPTModelBase(FairseqEncoderDecoderModel):
 
     @classmethod
     def build_encoder(cls, cfg, src_dict, embed_tokens):
-        return SPTEncoderBase(cfg, src_dict, embed_tokens)
+        return SRPEncoderBase(cfg, src_dict, embed_tokens)
 
     @classmethod
     def build_decoder(cls, cfg, tgt_dict, embed_tokens):
-        return SPTDecoderBase(
+        return SRPDecoderBase(
             cfg,
             tgt_dict,
             embed_tokens,
@@ -232,13 +232,9 @@ class SPTModelBase(FairseqEncoderDecoderModel):
         ratio = _ratio if _ratio else pm.c_shrink_rate
         dec = pm._decreasing         
 
-        is_first = True
         for _n in pd.keys():
             _indices = pd[_n]
             _p = recursive_get_param(self, _n)
-            # if is_first:
-            #     print("=======================================")
-            #     print("Before decreasing: ", _p[_indices][0:10])
             if dec[1] == 'a':
                 # Arithmetic
                 _p[_indices] = _p[_indices] - ratio
@@ -247,10 +243,6 @@ class SPTModelBase(FairseqEncoderDecoderModel):
                 _p[_indices] = _p[_indices] * ratio
             else:
                 raise Exception('Not an identified decreasing type')
-            # if is_first:
-            #     print("After decreasing: ", _p[_indices][0:10])
-            #     print("=======================================")
-            #     is_first=False
 
     @torch.no_grad()
     def pruning(self,):
@@ -323,12 +315,7 @@ class SPTModelBase(FairseqEncoderDecoderModel):
                         new_p = _p.data[local_mask, :][:, global_mask]
                         set_param(self, _n, nn.Parameter(new_p.data))
             else:
-                # qkvo_proj
-                # q: (qk_dim, gl_dim) | bias: qk_dim | global: 
-                # k: (qk_dim, gl_dim) | bias: qk_dim | global: 
-                # v: (vo_dim, gl_dim) | bias: vo_dim | global: 
-                # o: (gl_dim, vo_dim) | bias: gl_dim | global: previous sub-layer ln_c
-                
+                # qkvo_proj                
                 ende, ly, type, wb = _parsing(_n)
                 # Get global and local masks
                 if 'self_attn' in _n:
@@ -349,9 +336,6 @@ class SPTModelBase(FairseqEncoderDecoderModel):
                     else:
                         local_key = f'{ende}.layers.{ly}.encoder_attn_vo_c'
 
-                # q: (qk_dim, gl_dim) | bias: qk_dim | global: 
-                # k: (qk_dim, gl_dim) | bias: qk_dim | global: 
-                # v: (vo_dim, gl_dim) | bias: vo_dim | global: 
                 global_indices = pd[global_key] if global_key in pd else []
                 local_indices = pd[local_key] if local_key in pd else []
 
@@ -497,9 +481,7 @@ class PruningManager():
         return p 
 
     def get(self, stage=0):
-        print(f"############# {self.count} ################# {self.pruning_iter}")
         if self.count > self.pruning_iter-1:
-        # if self.count > self.pruning_iter:
             # Do not pruning
             return -1, -1, -1, -1, -1
         gle = int(np.ceil(self.GLE * self.p))
@@ -566,8 +548,6 @@ class PruningManager():
 
     def get_qkvo_dict(self, model, pn, qkvo):
         pruning_dict = {} # k:v = param_name: pruning indices
-        # score_dict = {} # k:v = param_name: score, args_list
-        # scores = []
         for ende in ["encoder", "decoder"]:
             module_list = ["self_attn"]
             if ende == "decoder":
@@ -581,15 +561,12 @@ class PruningManager():
                         continue
 
                     _head_dim = _grad.shape[-1]//4
-                    # print(f"### _grad shape: {_grad.shape[0]} | _head_dim: {_head_dim}")
                     args_list = []
                     for i in range(4):
                         temp_grad, _args = torch.sort(_grad[_head_dim*i:_head_dim*(i+1)], descending=True)
 
-                        # print(f"**** {i}: ", temp_grad.shape, _head_dim)
                         _args += _head_dim * i
                         args_list.append(_args[:pn])
-                    # score_dict[_n] = [score, args_list]
                     _inds_all = torch.cat(args_list)
                     pruning_dict[_n] = _inds_all
 
@@ -607,7 +584,6 @@ class PruningManager():
                 if score is None:
                     continue
                 scores.append(score)
-                # print(_n, score.shape)
         scores = torch.sort(torch.cat(scores), descending=True)[0]
         thres = scores[fc]
         count = 0
@@ -620,13 +596,13 @@ class PruningManager():
                     continue
                 cond = (score > thres)
                 if torch.sum(cond) > 0:
-                    # print(_n, torch.where(cond)[0])
                     count += torch.where(cond)[0].shape[0]
                     fc_dict[_n] = torch.where(cond)[0]
         return fc_dict
 
 
     def _get_attr(self, _model, _name):
+        # Get attribute of the model
         _attrs = _name.split(".")
         _parent = _model
         for _attr in _attrs[:-1]:
@@ -634,6 +610,7 @@ class PruningManager():
         return getattr(_parent, _attrs[-1])
 
 def _parsing(_name):
+    # Parse the name of parameters 
     assert 'embed_tokens' not in _name
     _l = _name.split('.')
     if 'attn' in _name and 'layer_norm' not in _name:

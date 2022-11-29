@@ -1,7 +1,18 @@
-# Copyright (c) Facebook, Inc. and its affiliates.
+################################################################################
+# Starlab Transformer Compression with SRP (Selectively Regularized Pruning)
 #
-# This source code is licensed under the MIT license found in the
-# LICENSE file in the root directory of this source tree.
+# Author: Hyojin Jeon (tarahjjeon@snu.ac.kr), Seoul National University
+#         U Kang (ukang@snu.ac.kr), Seoul National University
+#
+# Version : 1.0
+# Date : Nov 29, 2022
+# Main Contact: Hyojin Jeon
+#
+# This software is free of charge under research purposes.
+# For commercial purposes, please contact the authors.
+# This code is mainly based on the [GitHub Repository]
+# [GitHub Repository]: https://github.com/facebookresearch/fairseq
+################################################################################
 
 
 import re
@@ -43,7 +54,7 @@ class EncDecBaseConfig(FairseqDataclass):
     learned_pos: bool = field(
         default=False, metadata={"help": "use learned positional embeddings"}
     )
-    # args for "Reducing SPT Depth on Demand with Structured Dropout" (Fan et al., 2019)
+    # args for "Reducing SRP Depth on Demand with Structured Dropout" (Fan et al., 2019)
     layerdrop: float = field(default=0, metadata={"help": "LayerDrop probability"})
     layers_to_keep: Optional[List[int]] = field(
         default=None, metadata={"help": "which layers to *keep* when pruning"}
@@ -87,7 +98,7 @@ class QuantNoiseConfig(FairseqDataclass):
 
 
 @dataclass
-class SPTConfig(FairseqDataclass):
+class SRPConfig(FairseqDataclass):
     activation_fn: ChoiceEnum(utils.get_available_activation_fns()) = field(
         default="relu",
         metadata={"help": "activation function to use"},
@@ -174,7 +185,7 @@ class SPTConfig(FairseqDataclass):
             "help": "checkpoint activations at each layer, then save to gpu. Sets --checkpoint-activations."
         },
     )
-    # args for "Cross+Self-Attention for SPT Models" (Peitz et al., 2019)
+    # args for "Cross+Self-Attention for SRP Models" (Peitz et al., 2019)
     no_cross_attention: bool = field(
         default=False, metadata={"help": "do not perform cross-attention"}
     )
@@ -216,17 +227,16 @@ class SPTConfig(FairseqDataclass):
         metadata={"help": "make the layernorm exportable with torchscript."},
     )
 
-    # copied from spt_lm but expected in spt_decoder:
+    # copied from srp_lm but expected in srp_decoder:
     no_decoder_final_norm: bool = field(
         default=False,
         metadata={"help": "don't add an extra layernorm after the last decoder block"},
     )
 
-   ################################ For SPT ####################################
     compression_rate: float = field(
         default=0.2,
         metadata={
-            "help": "Target compression rate. Stop pruning if spt meets this"
+            "help": "Target compression rate. Stop pruning if srp meets this"
         },
     )
     
@@ -240,14 +250,14 @@ class SPTConfig(FairseqDataclass):
     pretrained_model: str = field(
         default=False,
         metadata={
-            "help": "path for pretrained model"
+            "help": "the path of pretrained model"
         },
     )
     
     srp: bool = field(
         default=False,
         metadata={
-            "help": "pruning type"
+            "help": "Use srp for pruning or not"
         },
     )
     
@@ -261,7 +271,7 @@ class SPTConfig(FairseqDataclass):
     pruning_iter: int = field(
         default=1,
         metadata={
-            "help": "number of epochs for pruning after warming-up epochs"
+            "help": "number of iterations for pruning"
         },
     )
     
@@ -295,7 +305,6 @@ class SPTConfig(FairseqDataclass):
         },
     )
 
-    ####################### Loss ###############################
     
     attn_kd: float = field(
         default=0.0,
@@ -320,13 +329,11 @@ class SPTConfig(FairseqDataclass):
         default=10,
         metadata={"help": "temperature for kd"},
     )
-    ###########################################################
 
-    ##############################################################################
 
     # We need to make this hierarchical dataclass like the flat namespace
     # __getattr__ and __setattr__ here allow backward compatibility
-    # for subclasses of SPT(Legacy) that depend on read/write on
+    # for subclasses of SRP(Legacy) that depend on read/write on
     # the flat namespace.
 
     def __getattr__(self, name):
@@ -376,7 +383,7 @@ class SPTConfig(FairseqDataclass):
             # go to the sub struct called `decoder`. There are ways to go around this, but let's keep it simple
             # for now.
             for fld in fields(cls):
-                # concretelly, the spt_config know what sub-dc it has, so we go through all the dc fields
+                # concretelly, the srp_config know what sub-dc it has, so we go through all the dc fields
                 # and if it's one that has a sub-dc, we build that sub-dc with `copy_keys()`
                 if fld.name == "decoder":
                     if safe_hasattr(args, "decoder"):

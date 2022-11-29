@@ -1,7 +1,18 @@
-# Copyright (c) Facebook, Inc. and its affiliates.
+################################################################################
+# Starlab Transformer Compression with SRP (Selectively Regularized Pruning)
 #
-# This source code is licensed under the MIT license found in the
-# LICENSE file in the root directory of this source tree.
+# Author: Hyojin Jeon (tarahjjeon@snu.ac.kr), Seoul National University
+#         U Kang (ukang@snu.ac.kr), Seoul National University
+#
+# Version : 1.0
+# Date : Nov 29, 2022
+# Main Contact: Hyojin Jeon
+#
+# This software is free of charge under research purposes.
+# For commercial purposes, please contact the authors.
+# This code is mainly based on the [GitHub Repository]
+# [GitHub Repository]: https://github.com/facebookresearch/fairseq
+################################################################################
 
 """
 Train a network across multiple GPUs.
@@ -53,10 +64,7 @@ class Trainer(object):
 
         self.cfg = cfg
         self.task = task
-
-        ######################## For SRP ###################################
-        self.teacher_model = None
-        ####################################################################
+        self.teacher_model = None # for kd
 
         # catalog shared parameters
         shared_params = _catalog_shared_params(model)
@@ -963,14 +971,11 @@ class Trainer(object):
                         # check local gradnorm single GPU case, trigger NanDetector
                         raise FloatingPointError("gradients are Nan/Inf")
 
-            #################### Performing optimizer step ########################
             if not scoring:
-                ############### Freeze selected paramters ########################
-                         
+                # Freeze selected paramters to prune 
                 if self.model.phase == 'pruning':
                     self.optimizer._optimizer.remove_grads(_model=self.model)
                                 
-                ##############################################################
                 with torch.autograd.profiler.record_function("optimizer"):
                     # take an optimization step
                     self.task.optimizer_step(
@@ -985,7 +990,6 @@ class Trainer(object):
                             return self.train_step(
                                 samples, raise_oom
                             )  # recursion to feed in same batch
-            ########################################################################
 
         except FloatingPointError:
 

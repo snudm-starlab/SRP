@@ -1,33 +1,44 @@
-# Copyright (c) Facebook, Inc. and its affiliates.
+################################################################################
+# Starlab Transformer Compression with SRP (Selectively Regularized Pruning)
 #
-# This source code is licensed under the MIT license found in the
-# LICENSE file in the root directory of this source tree.
+# Author: Hyojin Jeon (tarahjjeon@snu.ac.kr), Seoul National University
+#         U Kang (ukang@snu.ac.kr), Seoul National University
+#
+# Version : 1.0
+# Date : Nov 29, 2022
+# Main Contact: Hyojin Jeon
+#
+# This software is free of charge under research purposes.
+# For commercial purposes, please contact the authors.
+# This code is mainly based on the [GitHub Repository]
+# [GitHub Repository]: https://github.com/facebookresearch/fairseq
+################################################################################
 
 from fairseq.dataclass.utils import gen_parser_from_dataclass
 from fairseq.models import (
     register_model,
     register_model_architecture,
 )
-from .spt_config import (
-    SPTConfig,
+from .srp_config import (
+    SRPConfig,
     DEFAULT_MAX_SOURCE_POSITIONS,
     DEFAULT_MAX_TARGET_POSITIONS,
     DEFAULT_MIN_PARAMS_TO_WRAP,
 )
-from .spt_base import (
-    SPTModelBase,
+from .srp_base import (
+    SRPModelBase,
 )
 
 
-@register_model("spt")
-class SPTModel(SPTModelBase):
+@register_model("srp")
+class SRPModel(SRPModelBase):
     """
-    This is the legacy implementation of the spt model that
+    This is the legacy implementation of the srp model that
     uses argparse for configuration.
     """
     
     def __init__(self, args, encoder, decoder):
-        cfg = SPTConfig.from_namespace(args)
+        cfg = SRPConfig.from_namespace(args)
         super().__init__(cfg, encoder, decoder)
         self.args = args
 
@@ -37,7 +48,7 @@ class SPTModel(SPTModelBase):
         # we want to build the args recursively in this case.
         # do not set defaults so that settings defaults from various architectures still works
         gen_parser_from_dataclass(
-            parser, SPTConfig(), delete_default=True, with_prefix=""
+            parser, SRPConfig(), delete_default=True, with_prefix=""
         )
 
     @classmethod
@@ -81,31 +92,31 @@ class SPTModel(SPTModelBase):
             args.min_params_to_wrap = getattr(
                 args, "min_params_to_wrap", DEFAULT_MIN_PARAMS_TO_WRAP
             )
-        cfg = SPTConfig.from_namespace(args)
+        cfg = SRPConfig.from_namespace(args)
         return super().build_model(cfg, task)
 
     @classmethod
     def build_embedding(cls, args, dictionary, embed_dim, path=None):
         return super().build_embedding(
-            SPTConfig.from_namespace(args), dictionary, embed_dim, path
+            SRPConfig.from_namespace(args), dictionary, embed_dim, path
         )
 
     @classmethod
     def build_encoder(cls, args, src_dict, embed_tokens):
         return super().build_encoder(
-            SPTConfig.from_namespace(args), src_dict, embed_tokens
+            SRPConfig.from_namespace(args), src_dict, embed_tokens
         )
 
     @classmethod
     def build_decoder(cls, args, tgt_dict, embed_tokens):
         return super().build_decoder(
-            SPTConfig.from_namespace(args), tgt_dict, embed_tokens
+            SRPConfig.from_namespace(args), tgt_dict, embed_tokens
         )
 
 
 # architectures
 
-@register_model_architecture("spt", "spt")
+@register_model_architecture("srp", "srp")
 def base_architecture(args):
     args.encoder_embed_path = getattr(args, "encoder_embed_path", None)
     args.encoder_embed_dim = getattr(args, "encoder_embed_dim", 512)
@@ -161,8 +172,8 @@ def base_architecture(args):
     args.quant_noise_scalar = getattr(args, "quant_noise_scalar", 0)
 
 
-@register_model_architecture("spt", "spt_iwslt_de_en")
-def spt_iwslt_de_en(args):
+@register_model_architecture("srp", "srp_iwslt_de_en")
+def srp_iwslt_de_en(args):
     args.encoder_embed_dim = getattr(args, "encoder_embed_dim", 512)
     args.encoder_ffn_embed_dim = getattr(args, "encoder_ffn_embed_dim", 1024)
     args.encoder_attention_heads = getattr(args, "encoder_attention_heads", 4)
@@ -174,8 +185,8 @@ def spt_iwslt_de_en(args):
     base_architecture(args)
 
 
-@register_model_architecture("spt", "spt_iwslt_de_en_small")
-def spt_iwslt_de_en_small(args):
+@register_model_architecture("srp", "srp_iwslt_de_en_small")
+def srp_iwslt_de_en_small(args):
     args.encoder_embed_dim = getattr(args, "encoder_embed_dim", 512)
     args.encoder_ffn_embed_dim = getattr(args, "encoder_ffn_embed_dim", 1024)
     args.encoder_attention_heads = getattr(args, "encoder_attention_heads", 4)
@@ -186,26 +197,14 @@ def spt_iwslt_de_en_small(args):
     args.decoder_layers = getattr(args, "decoder_layers", 3)
     base_architecture(args)
 
-@register_model_architecture("spt", "spt_iwslt_de_en_test")
-def spt_iwslt_de_en_test(args):
-    args.encoder_embed_dim = getattr(args, "encoder_embed_dim", 60)
-    args.encoder_ffn_embed_dim = getattr(args, "encoder_ffn_embed_dim", 60)
-    args.encoder_attention_heads = getattr(args, "encoder_attention_heads", 4)
-    args.encoder_layers = getattr(args, "encoder_layers", 6)
-    args.decoder_embed_dim = getattr(args, "decoder_embed_dim", 60)
-    args.decoder_ffn_embed_dim = getattr(args, "decoder_ffn_embed_dim", 60)
-    args.decoder_attention_heads = getattr(args, "decoder_attention_heads", 4)
-    args.decoder_layers = getattr(args, "decoder_layers", 6)
-    base_architecture(args)
-
-@register_model_architecture("spt", "spt_wmt_en_de")
-def spt_wmt_en_de(args):
+@register_model_architecture("srp", "srp_wmt_en_de")
+def srp_wmt_en_de(args):
     base_architecture(args)
 
 
 # parameters used in the "Attention Is All You Need" paper (Vaswani et al., 2017)
-@register_model_architecture("spt", "spt_vaswani_wmt_en_de_big")
-def spt_vaswani_wmt_en_de_big(args):
+@register_model_architecture("srp", "srp_vaswani_wmt_en_de_big")
+def srp_vaswani_wmt_en_de_big(args):
     args.encoder_embed_dim = getattr(args, "encoder_embed_dim", 1024)
     args.encoder_ffn_embed_dim = getattr(args, "encoder_ffn_embed_dim", 4096)
     args.encoder_attention_heads = getattr(args, "encoder_attention_heads", 16)

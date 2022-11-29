@@ -1,7 +1,18 @@
-# Copyright (c) Facebook, Inc. and its affiliates.
+################################################################################
+# Starlab Transformer Compression with SRP (Selectively Regularized Pruning)
 #
-# This source code is licensed under the MIT license found in the
-# LICENSE file in the root directory of this source tree.
+# Author: Hyojin Jeon (tarahjjeon@snu.ac.kr), Seoul National University
+#         U Kang (ukang@snu.ac.kr), Seoul National University
+#
+# Version : 1.0
+# Date : Nov 29, 2022
+# Main Contact: Hyojin Jeon
+#
+# This software is free of charge under research purposes.
+# For commercial purposes, please contact the authors.
+# This code is mainly based on the [GitHub Repository]
+# [GitHub Repository]: https://github.com/facebookresearch/fairseq
+################################################################################
 
 import math
 from typing import Any, Dict, List, Optional
@@ -13,7 +24,7 @@ from torch import Tensor
 from fairseq import utils
 from fairseq.distributed import fsdp_wrap
 from fairseq.models import FairseqIncrementalDecoder
-from .spt_config import SPTConfig
+from .srp_config import SRPConfig
 from fairseq.modules import (
     AdaptiveSoftmax,
     BaseLayer,
@@ -22,23 +33,23 @@ from fairseq.modules import (
     PositionalEmbedding,
     SinusoidalPositionalEmbedding,
 )
-from ..modules import spt_layer, LayerNorm
+from ..modules import srp_layer, LayerNorm
 from fairseq.modules.checkpoint_activations import checkpoint_wrapper
 from fairseq.modules.quant_noise import quant_noise as apply_quant_noise_
 
 
 # rewrite name for backward compatibility in `make_generation_fast_`
 def module_name_fordropout(module_name: str) -> str:
-    if module_name == "SPTDecoderBase":
-        return "SPTDecoder"
+    if module_name == "SRPDecoderBase":
+        return "SRPDecoder"
     else:
         return module_name
 
 
-class SPTDecoderBase(FairseqIncrementalDecoder):
+class SRPDecoderBase(FairseqIncrementalDecoder):
     """
-    SPT decoder consisting of *cfg.decoder.layers* layers. Each layer
-    is a :class:`SPTDecoderLayer`.
+    SRP decoder consisting of *cfg.decoder.layers* layers. Each layer
+    is a :class:`SRPDecoderLayer`.
 
     Args:
         args (argparse.Namespace): parsed command-line arguments
@@ -104,10 +115,8 @@ class SPTDecoderBase(FairseqIncrementalDecoder):
             else None
         )
 
-        #######################################################
         self.embedding_c = nn.Parameter(torch.ones(embed_dim), requires_grad=True)
         self.pos_emb_mask = nn.Parameter(torch.zeros(0), requires_grad=False)
-        #######################################################
 
         if cfg.layernorm_embedding:
             self.layernorm_embedding = LayerNorm(embed_dim, export=cfg.export)
@@ -177,7 +186,7 @@ class SPTDecoderBase(FairseqIncrementalDecoder):
             )
 
     def build_decoder_layer(self, cfg, no_encoder_attn=False):
-        layer = spt_layer.SPTDecoderLayerBase(cfg, no_encoder_attn)
+        layer = srp_layer.SRPDecoderLayerBase(cfg, no_encoder_attn)
         checkpoint = cfg.checkpoint_activations
         if checkpoint:
             offload_to_cpu = cfg.offload_activations
@@ -295,7 +304,7 @@ class SPTDecoderBase(FairseqIncrementalDecoder):
         Similar to *forward* but only return features.
 
         Includes several features from "Jointly Learning to Align and
-        Translate with SPT Models" (Garg et al., EMNLP 2019).
+        Translate with SRP Models" (Garg et al., EMNLP 2019).
 
         Args:
             full_context_alignment (bool, optional): don't apply
@@ -350,10 +359,8 @@ class SPTDecoderBase(FairseqIncrementalDecoder):
 
         x = self.dropout_module(x)
 
-        ################### For SPT ########################
         if compute_c:
             x = x * self.embedding_c
-        ####################################################
 
 
         # B x T x C -> T x B x C
@@ -511,7 +518,7 @@ def Linear(in_features, out_features, bias=True):
     return m
 
 
-class SPTDecoder(SPTDecoderBase):
+class SRPDecoder(SRPDecoderBase):
     def __init__(
         self,
         args,
@@ -522,7 +529,7 @@ class SPTDecoder(SPTDecoderBase):
     ):
         self.args = args
         super().__init__(
-            SPTConfig.from_namespace(args),
+            SRPConfig.from_namespace(args),
             dictionary,
             embed_tokens,
             no_encoder_attn=no_encoder_attn,
@@ -531,10 +538,10 @@ class SPTDecoder(SPTDecoderBase):
 
     def build_output_projection(self, args, dictionary, embed_tokens):
         super().build_output_projection(
-            SPTConfig.from_namespace(args), dictionary, embed_tokens
+            SRPConfig.from_namespace(args), dictionary, embed_tokens
         )
 
     def build_decoder_layer(self, args, no_encoder_attn=False):
         return super().build_decoder_layer(
-            SPTConfig.from_namespace(args), no_encoder_attn=no_encoder_attn
+            SRPConfig.from_namespace(args), no_encoder_attn=no_encoder_attn
         )

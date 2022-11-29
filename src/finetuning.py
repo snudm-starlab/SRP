@@ -1,10 +1,22 @@
 #!/usr/bin/env python3 -u
-# Copyright (c) Facebook, Inc. and its affiliates.
+################################################################################
+# Starlab Transformer Compression with SRP (Selectively Regularized Pruning)
 #
-# This source code is licensed under the MIT license found in the
-# LICENSE file in the root directory of this source tree.
+# Author: Hyojin Jeon (tarahjjeon@snu.ac.kr), Seoul National University
+#         U Kang (ukang@snu.ac.kr), Seoul National University
+#
+# Version : 1.0
+# Date : Nov 29, 2022
+# Main Contact: Hyojin Jeon
+#
+# This software is free of charge under research purposes.
+# For commercial purposes, please contact the authors.
+# This code is mainly based on the [GitHub Repository]
+# [GitHub Repository]: https://github.com/facebookresearch/fairseq
+################################################################################
+
 """
-Train a new model on one or across multiple GPUs.
+Finetuning the pruned model on one or across multiple GPUs.
 """
 
 import argparse
@@ -99,15 +111,10 @@ def main(cfg: FairseqConfig) -> None:
     else:
         model = task.build_model(cfg.model)
 
-    ############# Perform shaping Model for loading Pruned Model #################
-    # pass checkpoint path and shaving model
-    # pretrained_model = f'{cfg.checkpoint.save_dir}/{cfg.checkpoint.restore_file}'
+    # pass checkpoint path and reshaping model
     pretrained_model = cfg.model.pretrained_model
     if os.path.isfile(pretrained_model):
-        # print("+++++++ Loading pre-trained model for finetuning +++++++")
-        model = checkpoint_utils.load_spt(pretrained_model, model)
-        # print("+++++ Loading pre-trained model for finetuning done +++++")
-    ##############################################################################
+        model = checkpoint_utils.load_srp(pretrained_model, model)
 
     criterion = task.build_criterion(cfg.criterion)
     logger.info(model)
@@ -174,9 +181,7 @@ def main(cfg: FairseqConfig) -> None:
         )
     )
 
-    # Load the latest checkpoint if one is available and restore the
-    # corresponding train iterator
-    ##################### For SPT ################################
+    # Load the latest checkpoint 
     extra_state, epoch_itr = checkpoint_utils.load_checkpoint(
         cfg.checkpoint,
         trainer,
@@ -186,7 +191,6 @@ def main(cfg: FairseqConfig) -> None:
 
     if extra_state is not None and 'pruning_manager' in extra_state:
         trainer.model.pm = extra_state['pruning_manager']
-    ##############################################################
 
     max_epoch = cfg.optimization.max_epoch or math.inf
     lr = trainer.get_lr()
@@ -220,25 +224,17 @@ def main(cfg: FairseqConfig) -> None:
         num_groups = trainer.model.get_num_groups()
         num_groups = [str(_num) for _num in num_groups]
         
-        ##################### SPT  Pruning ##########################
         # print pruning status        
         _res = f'{_phase[0]},{epoch_itr.epoch},'
         _res+= ','.join(num_groups) + ','
-        # _group_res = group_report(trainer.model, gl_dict)
-        # _res += _group_res
         _res += f'{_params},{valid_losses[0]}'
-        # print("+"*15, '  Test ', '+'*15)
         logger.info(_res)
         _path_list = cfg.checkpoint.save_dir.split('/')
         _res_file = f'../checkpoints/res_files/{_path_list[-1]}.csv'
         logger.info(f"Result file: {_res_file}")
-        # print("+"*15, '  Test ', '+'*15)
         with open(_res_file, 'a') as f:
             f.write(_res + '\n')
         
-        # Save pruning status (param/ bleu/ groups change)
-        ##############################################################
-
         if should_stop:
             break
 
@@ -608,10 +604,6 @@ def cli_main(
                 distributed_utils.call_main(cfg, main)
     else:
         distributed_utils.call_main(cfg, main)
-
-    # if cfg.common.use_plasma_view:
-    #     server.server.kill()
-
 
 if __name__ == "__main__":
     cli_main()

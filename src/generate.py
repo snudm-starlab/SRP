@@ -1,8 +1,19 @@
 #!/usr/bin/env python3 -u
-# Copyright (c) Facebook, Inc. and its affiliates.
+################################################################################
+# Starlab Transformer Compression with SRP (Selectively Regularized Pruning)
 #
-# This source code is licensed under the MIT license found in the
-# LICENSE file in the root directory of this source tree.
+# Author: Hyojin Jeon (tarahjjeon@snu.ac.kr), Seoul National University
+#         U Kang (ukang@snu.ac.kr), Seoul National University
+#
+# Version : 1.0
+# Date : Nov 29, 2022
+# Main Contact: Hyojin Jeon
+#
+# This software is free of charge under research purposes.
+# For commercial purposes, please contact the authors.
+# This code is mainly based on the [GitHub Repository]
+# [GitHub Repository]: https://github.com/facebookresearch/fairseq
+################################################################################
 """
 Translate pre-processed data with a trained model.
 """
@@ -24,6 +35,7 @@ from fairseq import options, scoring, tasks, utils
 from fairseq.dataclass.utils import convert_namespace_to_omegaconf
 from fairseq.logging import progress_bar
 from fairseq.logging.meters import StopwatchMeter, TimeMeter
+from flops_counter import FLOPS_COUNTER
 
 
 def main(cfg: DictConfig):
@@ -101,21 +113,7 @@ def _main(cfg: DictConfig, output_file):
         suffix=cfg.checkpoint.checkpoint_suffix,
         strict=(cfg.checkpoint.checkpoint_shard_count == 1),
         num_shards=cfg.checkpoint.checkpoint_shard_count,
-    )
-    """ 
-    ##################### SRP ########################################
-    num_params = np.sum([p.numel() for p in models[0].parameters() if p.requires_grad])
-    print(f"# Params of SRP model: {num_params / 1e6:.2f}")
-
-    named_params = dict(models[0].named_parameters())
-    print(named_params['encoder.embedding_c'])
-    print(named_params['decoder.embedding_c'])
-
-    import time
-    time.sleep(1000)
-    ##################################################################
-    """
-    
+    )    
 
     # loading the dataset should happen after the checkpoint has been loaded so we can give it the saved task config
     task.load_dataset(cfg.dataset.gen_subset, task_cfg=saved_cfg.task)
@@ -410,6 +408,40 @@ def _main(cfg: DictConfig, output_file):
             file=output_file,
         )
 
+    # print the number of parameters and FLOPs
+    num_params = np.sum([_p.numel() for _p in models[0].parameters() if _p.requires_grad])
+    param_dict = models[0].state_dict()
+    s = 50
+    heads = 4
+    num_layers = 6
+    emb = param_dict[f'encoder.embedding_c'].shape[0]
+    en_self_qks = [param_dict[f'encoder.layers.{l}.self_attn_qk_c'].shape[0] 
+            for l in range(num_layers)]
+    en_self_vos = [param_dict[f'encoder.layers.{l}.self_attn_vo_c'].shape[0]
+            for l in range(num_layers)]
+    en_fcs = [param_dict[f'encoder.layers.{l}.fc_c'].shape[0] for l in range(num_layers)]
+
+    de_self_qks = [param_dict[f'decoder.layers.{l}.self_attn_qk_c'].shape[0] \
+            for l in range(num_layers)]
+    de_self_vos = [param_dict[f'decoder.layers.{l}.self_attn_vo_c'].shape[0] \
+            for l in range(num_layers)]
+    de_encoder_qks = [param_dict[f'decoder.layers.{l}.encoder_attn_qk_c'].shape[0] \
+            for l in range(num_layers)]
+    de_encoder_vos = [param_dict[f'decoder.layers.{l}.encoder_attn_vo_c'].shape[0] \
+            for l in range(num_layers)]
+    de_fcs = [param_dict[f'decoder.layers.{l}.fc_c'].shape[0] for l in range(num_layers)]
+
+    tar_dict_size = 6632
+    
+    flops = FLOPS_COUNTER(s, emb, heads,
+                en_self_qks, en_self_vos, en_fcs,
+                de_self_qks, de_self_vos, de_fcs,
+                de_encoder_qks, de_encoder_vos,
+                tar_dict_size).get_model_flops()
+ 
+    print(f"* Number of params: {num_params/1e6:.3f}M")
+    print(f"* FLOPs: {flops/1e9:.3f}G")
+    print(f"* {scorer.result_string().split(',')[0]}")
     return scorer
 
 
