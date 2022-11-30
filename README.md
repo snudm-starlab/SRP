@@ -9,14 +9,17 @@ SRP proposed a novel process for pruning Transfomer and the process works as fol
 We first define an architecture is pruning-safe for some parameters under some codition iff the inference of the model is consistent after pruning the parameters under the condition.
 
 1) Designing Pruning-safe Architecture
+
 We modify the architecture of Transformer to be pruning-safe. We introduce connectivity parameters and weighted layer normalization. 
 Our modified architecture is pruning safe when pruning parameters that its corresponding connectivity parameters are zero.
 
 2) Selecting Parameters to be pruned
+
 We compute the negative partial derivative of the objective function with respect to each connectivity parameter and use as for the importance score of the corresponding parameter. 
 We select parameters with the lowest importance score to be pruned.
 
 3) Shrinking Paramters with Selective Regularization
+
 We freeze the selected parameters and continuously shrinking corresponding connectivity parameters. 
 SRP proposes two types of shrinking strategies: arithmetic and geometrical shrinking.
 SRP proposed two-staged pruning which is a novel pruning strategy that prunes parameters within two stages.
