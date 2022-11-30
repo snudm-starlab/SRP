@@ -229,6 +229,7 @@ def main(cfg: FairseqConfig) -> None:
         num_groups = [str(_num) for _num in num_groups]
         
         # Writing training status (param/ bleu/ groups change)
+        
         _res = f'{epoch_itr.epoch},'
         _res+= ','.join(num_groups) + ','
         _res += f'{_params},{valid_losses[0]}'
@@ -236,6 +237,13 @@ def main(cfg: FairseqConfig) -> None:
         _path_list = cfg.checkpoint.save_dir.split('/')
         _res_file = f'../checkpoints/res_files/{_path_list[-1]}.csv'
         logger.info(f"Result file: {_res_file}")
+        
+        try:
+            if not os.path.exists('../checkpoints/res_files'):
+                os.makedirs('../checkpoints/res_files')
+        except:
+            print("Error: Failed to create the directories")
+
         with open(_res_file, 'a') as f:
             f.write(_res + '\n')
         
