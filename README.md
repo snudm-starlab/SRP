@@ -6,7 +6,7 @@ This project is a PyTorch implementation of SRP (Selectively Regularized Pruning
 SRP proposed a novel process for pruning Transfomer and the process works as following three steps.
 
 #### 0. Defining Pruning-safe Architecture
-We first define an architecture is pruning-safe for some parameters under some codition iff the inference of the model is consistent after pruning the parameters under the condition.
+Before we start pruning process, we define an architecture is pruning-safe for some parameters under some codition iff the inference of the model is consistent after pruning the parameters under the condition.
 
 #### 1. Designing Pruning-safe Architecture
 
