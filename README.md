@@ -89,7 +89,7 @@ SRP
 * pandas 
 
 ## Installing Requirements
-Install [PyTorch](http://pytorch.org/) (version >= 1.5.0) and install fairseq by following instructions:
+Install [PyTorch](http://pytorch.org/) (version >= 1.5.0) and install fairseq with following instructions:
 ```
 git clone https://github.com/pytorch/fairseq 
 cd fairseq
