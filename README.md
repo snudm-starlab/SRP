@@ -5,20 +5,20 @@ This project is a PyTorch implementation of SRP (Selectively Regularized Pruning
 #### Brief Explanation of SRP. 
 SRP proposed a novel process for pruning Transfomer and the process works as following three steps.
 
-0) Defining Pruning-safe Architecture
+#### 0. Defining Pruning-safe Architecture
 We first define an architecture is pruning-safe for some parameters under some codition iff the inference of the model is consistent after pruning the parameters under the condition.
 
-1) Designing Pruning-safe Architecture
+#### 1. Designing Pruning-safe Architecture
 
 We modify the architecture of Transformer to be pruning-safe. We introduce connectivity parameters and weighted layer normalization. 
 Our modified architecture is pruning safe when pruning parameters that its corresponding connectivity parameters are zero.
 
-2) Selecting Parameters to be pruned
+#### 2. Selecting Parameters to be pruned
 
 We compute the negative partial derivative of the objective function with respect to each connectivity parameter and use as for the importance score of the corresponding parameter. 
 We select parameters with the lowest importance score to be pruned.
 
-3) Shrinking Paramters with Selective Regularization
+#### 3. Shrinking Paramters with Selective Regularization
 
 We freeze the selected parameters and continuously shrinking corresponding connectivity parameters. 
 SRP proposes two types of shrinking strategies: arithmetic and geometrical shrinking.
@@ -115,7 +115,15 @@ make
 * We provide scripts for pre-training, pruning and testing.
 Followings are key arguments:
     * arch: architecture type
-    * 
+    * compression-rate: target compreesion rate
+    * srp: whether use srp or not
+    * pruning-stage: the stage of pruning, use 0 for single-staged pruning
+    * pruning-iter: number of pruning iterations
+    * pruning-period: number of epochs for pruning process
+    * decreasing: decreasing type for connectivity parameters
+    * save-dir: path for saving checkpoints
+    * pretrained-model: path for pre-trained model to be pruned
+    
 
 * First, we begin with training a Transformer model
 ```
@@ -152,7 +160,7 @@ CUDA_VISIBLE_DEVICES=0 python src/pruning.py \
     --dropout 0.3 --weight-decay 0.0001 \
     --criterion srp --label-smoothing 0.1 \
     --max-epoch 500 --weighted-layernorm \
-    --compression-rate 0.1 --srp --pruning-stage 1 \
+    --compression-rate 0.2 --srp --pruning-stage 1 \
     --save-interval 100 \
     --pruning-iter 1 --pruning-period 500 --decreasing sg \
     --max-tokens 4096 \
@@ -180,7 +188,7 @@ CUDA_VISIBLE_DEVICES=0 python src/pruning.py \
     --lr 5e-4 \
     --dropout 0.3 --weight-decay 0.0001 \
     --criterion srp --label-smoothing 0.1 \
-    --compression-rate 0.1 --srp --pruning-stage 2 \
+    --compression-rate 0.2 --srp --pruning-stage 2 \
     --save-interval 100 --weighted-layernorm \
     --pruning-iter 1 --pruning-period 500 --decreasing sg \
     --max-tokens 4096 \
@@ -207,7 +215,7 @@ CUDA_VISIBLE_DEVICES=0 python src/pruning.py \
     --lr 5e-4 \
     --dropout 0.3 --weight-decay 0.0001 \
     --criterion srp --label-smoothing 0.1 \
-    --compression-rate 0.1 --srp --pruning-stage 0 \
+    --compression-rate 0.2 --srp --pruning-stage 0 \
     --max-epoch 300 \
     --pruning-iter 1 --pruning-period 300 --decreasing sa \
     --attn-kd 1 --prob-kd 0. --T 10 \
