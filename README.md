@@ -149,7 +149,7 @@ CUDA_VISIBLE_DEVICES=0 python ../src/train.py \
 ```
 This code is also saved in scripts/iwslt_srp.sh
 
-* To perform pruning using SRP, run script:
+* To perform pruning using SRP, run following scripts.
 
 For stage 1: 
 ```
@@ -205,7 +205,7 @@ CUDA_VISIBLE_DEVICES=0 python ..src/pruning.py \
     --pretrained-model ../checkpoints/stage1/checkpoint_last.pt
 ```
 
-This codes is also saved in scripts/iwslt_srp_two_staged_pruning.sh
+These codes are also saved in scripts/iwslt_srp_two_staged_pruning.sh
 
 * If you want to perform single-staged pruning, run script:
 ```
