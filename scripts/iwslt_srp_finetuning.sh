@@ -1,4 +1,4 @@
-CUDA_VISIBLE_DEVICES=3 python ../src/finetuning.py \
+CUDA_VISIBLE_DEVICES=0 python ../src/finetuning.py \
     ../data-bin/iwslt14.tokenized.de-en \
     --user-dir ../src \
     --arch srp_iwslt_de_en --share-decoder-input-output-embed \

@@ -1,4 +1,4 @@
-CUDA_VISIBLE_DEVICES=1 python ../src/pruning.py \
+CUDA_VISIBLE_DEVICES=0 python ../src/pruning.py \
     ../data-bin/iwslt14.tokenized.de-en \
     --user-dir ../src \
     --arch srp_iwslt_de_en --share-decoder-input-output-embed \
@@ -21,7 +21,7 @@ CUDA_VISIBLE_DEVICES=1 python ../src/pruning.py \
     --save-dir ../checkpoints/stage1 \
     --pretrained-model ../checkpoints/base/checkpoint_best.pt \
 
-CUDA_VISIBLE_DEVICES=1 python ../src/pruning.py \
+CUDA_VISIBLE_DEVICES=0 python ../src/pruning.py \
     ../data-bin/iwslt14.tokenized.de-en \
     --user-dir ../src \
     --arch srp_iwslt_de_en --share-decoder-input-output-embed \
