@@ -1,21 +1,17 @@
-################################################################################
-# Starlab Transformer Compression with SRP (Selectively Regularized Pruning)
-#
-# Author: Hyojin Jeon (tarahjjeon@snu.ac.kr), Seoul National University
-#         U Kang (ukang@snu.ac.kr), Seoul National University
-#
-# Version : 1.0
-# Date : Nov 29, 2022
-# Main Contact: Hyojin Jeon
-#
-# This software is free of charge under research purposes.
-# For commercial purposes, please contact the authors.
-# This code is mainly based on the [GitHub Repository]
-# [GitHub Repository]: https://github.com/facebookresearch/fairseq
-################################################################################
-
 """
-Train a network across multiple GPUs.
+Starlab Transformer Compression with SRP (Selectively Regularized Pruning)
+
+Author: Hyojin Jeon (tarahjjeon@snu.ac.kr), Seoul National University
+        U Kang (ukang@snu.ac.kr), Seoul National University
+
+Version : 1.0
+Date : Nov 29, 2022
+Main Contact: Hyojin Jeon
+
+This software is free of charge under research purposes.
+For commercial purposes, please contact the authors.
+This code is mainly based on the [GitHub Repository]
+[GitHub Repository]: https://github.com/facebookresearch/fairseq
 """
 
 import contextlib
@@ -39,12 +35,12 @@ from fairseq.logging import meters, metrics
 from fairseq.models.ema import build_ema
 from fairseq.nan_detector import NanDetector
 from fairseq.optim import lr_scheduler
-from fairseq.utils import safe_hasattr
+from fairseq.utils import safe_hasattr, xla_device_to_cpu
 
 logger = logging.getLogger(__name__)
 
 
-class Trainer(object):
+class Trainer:
     """Main class for data parallel training.
 
     This class supports synchronous distributed data parallel training,
@@ -58,7 +54,8 @@ class Trainer(object):
 
         if isinstance(cfg, Namespace):
             logger.warning(
-                "argparse.Namespace configuration is deprecated! Automatically converting to OmegaConf"
+                "argparse.Namespace configuration is deprecated!"
+                "Automatically converting to OmegaConf"
             )
             cfg = convert_namespace_to_omegaconf(cfg)
 
@@ -78,8 +75,6 @@ class Trainer(object):
             self.device = torch.device("cpu")
 
         if self.is_fsdp:
-            import fairscale
-
             if self.cfg.common.bf16:
                 raise ValueError(
                     "FullyShardedDataParallel is not compatible with --bf16 or "
@@ -90,14 +85,14 @@ class Trainer(object):
                     "FullyShardedDataParallel is not compatible with --zero-sharding "
                     "option (it's already built in)"
                 )
-            if (
-                max(self.cfg.optimization.update_freq) > 1
-                and fairscale.__version__ < "0.4.0"
-            ):
-                raise RuntimeError(
-                    "Please update to fairscale 0.4.0 or newer when combining "
-                    "--update-freq with FullyShardedDataParallel"
-                )
+            # if (
+            #     max(self.cfg.optimization.update_freq) > 1
+            #     and fairscale.__version__ < "0.4.0"
+            # ):
+            #     raise RuntimeError(
+            #         "Please update to fairscale 0.4.0 or newer when combining "
+            #         "--update-freq with FullyShardedDataParallel"
+            #     )
         else:
             if (
                 hasattr(self.cfg.distributed_training, "cpu_offload")
@@ -138,7 +133,7 @@ class Trainer(object):
             ref = _get_module_by_path(self._model, shared_param[0])
             for path in shared_param[1:]:
                 logger.info(
-                    "detected shared parameter: {} <- {}".format(shared_param[0], path)
+                    "detected shared parameter: %s <- %s", shared_param[0], path
                 )
                 _set_module_by_path(self._model, path, ref)
 
@@ -153,7 +148,6 @@ class Trainer(object):
         self._wrapped_model = None
         self._ema = None
 
-        # TODO(myleott): support tpu
         if self.cuda and self.data_parallel_world_size > 1:
             self._grad_norm_buf = torch.cuda.DoubleTensor(self.data_parallel_world_size)
         else:
@@ -193,28 +187,33 @@ class Trainer(object):
 
     @property
     def data_parallel_world_size(self):
+        """Total number of GPUs across all nodes."""
         if self.cfg.distributed_training.distributed_world_size == 1:
             return 1
         return distributed_utils.get_data_parallel_world_size()
 
     @property
     def data_parallel_process_group(self):
+        """The process group to be used for synchronized DDP."""
         return distributed_utils.get_data_parallel_group()
 
     @property
     def data_parallel_rank(self):
+        """The rank of the current process group."""
         if self.cfg.distributed_training.distributed_world_size == 1:
             return 0
         return distributed_utils.get_data_parallel_rank()
 
     @property
     def is_data_parallel_master(self):
+        """Whether this is the master process of the data parallel group."""
         # NOTE: this returns true for all model parallel replicas with data
         # parallel rank 0
         return self.data_parallel_rank == 0
 
     @property
     def use_distributed_wrapper(self) -> bool:
+        """Whether to use DistributedFairseqModel."""
         return (
             self.data_parallel_world_size > 1 and not self.cfg.optimization.use_bmuf
         ) or (self.is_fsdp and self.cfg.distributed_training.cpu_offload)
@@ -231,6 +230,7 @@ class Trainer(object):
 
     @property
     def always_call_state_dict_during_save_checkpoint(self) -> bool:
+        """Indicates whether to always call state_dict() when saving checkpoints."""
         if self.is_fsdp and not self.cfg.distributed_training.use_sharded_state:
             # FSDP calls communication collective when consolidating checkpoints
             return True
@@ -241,14 +241,13 @@ class Trainer(object):
     def checkpoint_suffix(self) -> str:
         """Suffix to add to the checkpoint file name."""
         if self.is_fsdp and self.cfg.distributed_training.use_sharded_state:
-            return self.cfg.checkpoint.checkpoint_suffix + "-shard{0}".format(
-                self.data_parallel_rank
-            )
+            return self.cfg.checkpoint.checkpoint_suffix + f"-shard{self.data_parallel_rank}"
         else:
             return self.cfg.checkpoint.checkpoint_suffix or ""
 
     @property
     def criterion(self):
+        """The loss function used during training."""
         if self._wrapped_criterion is None:
             if utils.has_parameters(self._criterion) and self.use_distributed_wrapper:
                 self._wrapped_criterion = models.DistributedFairseqModel(
@@ -263,6 +262,7 @@ class Trainer(object):
 
     @property
     def model(self):
+        """The model to be optimized."""
         if self._wrapped_model is None:
             if self.use_distributed_wrapper:
                 self._wrapped_model = models.DistributedFairseqModel(
@@ -277,6 +277,7 @@ class Trainer(object):
 
     @property
     def ema(self):
+        """The Exponential Moving Average Shadow Model."""
         if self._ema is None:
             self._build_ema()
         return self._ema
@@ -288,12 +289,14 @@ class Trainer(object):
 
     @property
     def optimizer(self):
+        """The optimizer."""
         if self._optimizer is None:
             self._build_optimizer()
         return self._optimizer
 
     @property
     def lr_scheduler(self):
+        """The learning rate scheduler."""
         if self._lr_scheduler is None:
             self._build_optimizer()  # this will initialize self._lr_scheduler
         return self._lr_scheduler
@@ -382,6 +385,7 @@ class Trainer(object):
 
     @property
     def is_fsdp(self):
+        """Whether to use FullyShardedDataParallel."""
         return self.cfg.distributed_training.ddp_backend == "fully_sharded"
 
     def consolidate_optimizer(self):
@@ -392,12 +396,13 @@ class Trainer(object):
         if hasattr(self.optimizer.optimizer, "consolidate_state_dict"):
             self.optimizer.optimizer.consolidate_state_dict()
         elif self.is_fsdp and not self.model.use_sharded_state:
-            st = self.model.gather_full_optim_state_dict(
+            state = self.model.gather_full_optim_state_dict(
                 self.optimizer
             )  # only returns on rank 0
-            self._gathered_optim_state = st
+            self._gathered_optim_state = state
 
     def state_dict(self):
+        """Return the trainer state dict (for checkpoint saving)."""
         state_dict = {
             "args": None,  # legacy
             "cfg": (
@@ -446,7 +451,7 @@ class Trainer(object):
     def save_checkpoint(self, filename, extra_state):
         """Save all training state in a checkpoint file."""
 
-        logger.info(f"Saving checkpoint to {os.path.abspath(filename)}")
+        logger.info("Saving checkpoint to %s", os.path.abspath(filename))
         # call state_dict on all ranks in case it needs internal communication
         state_dict = utils.move_to_cpu(self.state_dict())
         state_dict["extra_state"].update(extra_state)
@@ -456,7 +461,7 @@ class Trainer(object):
                 filename,
                 async_write=self.cfg.checkpoint.write_checkpoints_asynchronously,
             )
-        logger.info(f"Finished saving checkpoint to {os.path.abspath(filename)}")
+        logger.info("Finished saving checkpoint to %s", os.path.abspath(filename))
 
     def load_checkpoint(
         self,
@@ -473,7 +478,7 @@ class Trainer(object):
         """
         extra_state, self._optim_history, last_optim_state = None, [], None
 
-        logger.info(f"Preparing to load checkpoint {filename}")
+        logger.info("Preparing to load checkpoint %s", filename)
         is_distributed = self.data_parallel_world_size > 1
         bexists = PathManager.isfile(filename)
         if bexists:
@@ -529,21 +534,32 @@ class Trainer(object):
                     )
 
                 # this is the code related to AdaPrune
-                # In short, it removes redundant heads in multi-head attention module based on heads importance provided
-                # For more info, please refer to the paper: https://openreview.net/forum?id=_CMSV7FTzGI
+                # In short, it removes redundant heads in multi-head attention module
+                # based on heads importance provided
+                # For more info, please refer to the paper
+                # See: https://openreview.net/forum?id=_CMSV7FTzGI
+
                 # The idea of prune in mha can be summarized as
-                # Fine tune model (e.g. roberta encoder) on a certain datasets with regularization
-                # After the model is trained. User could use get_reserve_head_index and _adaptive_prune_heads functions to get the top X heads with most importance.
-                # Then user uses the rank to prune a new roberta encoder and save the pruned ckpt manually.
+                # Fine tune model (e.g. roberta encoder) on a certain datasets
+                # with regularization After the model is trained.
+
+                # User could use get_reserve_head_index and _adaptive_prune_heads functions
+                # to get the top X heads with most importance.
+                # Then user uses the rank to prune a new roberta encoder and
+                # save the pruned ckpt manually.
                 # User will fine tune the the new roberta encoder via the ckpt saved above
-                # To get rid of registering different pruned version of Roberta, I use the argument --mha-heads-to-keep to prune the Roberta model into a pruned version which matches the pruned ckpt.
+
+                # To get rid of registering different pruned version of Roberta,
+                # I use the argument --mha-heads-to-keep to prune the Roberta model
+                # into a pruned version which matches the pruned ckpt.
                 if (
                     safe_hasattr(self.model, "args")
                     and safe_hasattr(self.model.args, "mha_heads_to_keep")
                     and self.model.args.mha_heads_to_keep != -1
                 ):
                     logger.info(
-                        f"Prune model: keep {self.model.args.mha_heads_to_keep} heads for each multihead attention module"
+                        "Prune model: keep %s heads for each multihead attention module",
+                        self.model.args.mha_heads_to_keep
                     )
                     for layer in self.model.encoder.sentence_encoder.layers:
                         reserve_head_index = layer.self_attn._get_reserve_head_index(
@@ -555,21 +571,30 @@ class Trainer(object):
                         layer.self_attn._set_skip_embed_dim_check()
                     logger.info(self.model)
                 # this is the code related to AdaPrune
-                # In short, it removes redundant units in feedforward layer in each transformer layer based on importance
-                # For more info, please refer to the paper: https://openreview.net/forum?id=_CMSV7FTzGI
+                # In short, it removes redundant units in feedforward layer
+                # in each transformer layer based on importance
+                # For more info, please refer to the paper
+                # https://openreview.net/forum?id=_CMSV7FTzGI
+
                 # The idea of prune in ffn can be summarized as
                 # Fine tune model (e.g. roberta encoder) on a certain datasets with regularization
-                # After the model is trained. User could use _get_fc_rank and _prune_fc_layer functions to get the top X units with most importance.
-                # Then user uses the rank to prune a new roberta encoder and save the pruned ckpt manually.
+                # After the model is trained. User could use _get_fc_rank and
+                # _prune_fc_layer functions to get the top X units with most importance.
+                # Then user uses the rank to prune a new roberta encoder and
+                # save the pruned ckpt manually.
+
                 # User will fine tune the the new roberta encoder via the ckpt saved above
-                # To get rid of registering different pruned version of Roberta, I use the argument --ffn-blocks-to-remove to prune the Roberta model into a pruned version which matches the pruned ckpt.
+                # To get rid of registering different pruned version of Roberta,
+                # I use the argument --ffn-blocks-to-remove to prune the Roberta model
+                # into a pruned version which matches the pruned ckpt.
                 if (
                     safe_hasattr(self.model, "args")
                     and safe_hasattr(self.model.args, "ffn_blocks_to_remove")
                     and self.model.args.ffn_blocks_to_remove != -1
                 ):
                     logger.info(
-                        f"Prune model: remove {self.model.args.ffn_blocks_to_remove} ffn blocks for each transformer layer"
+                        "Prune model: remove %s ffn blocks for each transformer layer",
+                        self.model.args.ffn_blocks_to_remove
                     )
                     for layer in self.model.encoder.sentence_encoder.layers:
                         remove_index = layer._get_fc_rank(
@@ -589,11 +614,12 @@ class Trainer(object):
                     )
                     del state["criterion"]
 
-            except Exception:
-                raise Exception(
-                    "Cannot load model parameters from checkpoint {}; "
-                    "please ensure that the architectures match.".format(filename)
-                )
+            except Exception as exc:
+                raise type(exc)(
+                    f"Cannot load model parameters from checkpoint {filename}; "
+                    "please ensure extra_state = state['extra_state']"
+                ) from exc
+
             extra_state = state["extra_state"]
             self._optim_history = state["optimizer_history"]
 
@@ -605,10 +631,12 @@ class Trainer(object):
             last_optim = self._optim_history[-1]
             assert (
                 last_optim["criterion_name"] == self.get_criterion().__class__.__name__
-            ), f"Criterion does not match; please reset the optimizer (--reset-optimizer). {last_optim['criterion_name']} vs {self.get_criterion().__class__.__name__}"
+            ), ("Criterion does not match; please reset the optimizer (--reset-optimizer)."
+            + f"{last_optim['criterion_name']} vs {self.get_criterion().__class__.__name__}")
             assert (
                 last_optim["optimizer_name"] == self.optimizer.__class__.__name__
-            ), f"Optimizer does not match; please reset the optimizer (--reset-optimizer). {last_optim['optimizer_name']} vs {self.optimizer.__class__.__name__}"
+            ), ("Optimizer does not match; please reset the optimizer (--reset-optimizer)."
+            + f"{last_optim['optimizer_name']} vs {self.optimizer.__class__.__name__}")
 
             if not reset_lr_scheduler:
                 self.lr_scheduler.load_state_dict(last_optim["lr_scheduler_state"])
@@ -654,7 +682,7 @@ class Trainer(object):
 
             if self.cfg.ema.store_ema:
                 if "ema" not in extra_state:
-                    logger.warn(
+                    logger.warning(
                         "EMA not found in checkpoint. But store_ema is True. "
                         "EMA is re-initialized from checkpoint."
                     )
@@ -676,13 +704,12 @@ class Trainer(object):
                             self.ema.build_fp32_params()
 
             logger.info(
-                "Loaded checkpoint {} (epoch {} @ {} updates)".format(
-                    filename, epoch, self.get_num_updates()
+                "Loaded checkpoint %s (epoch %d @ %d updates)",
+                filename, epoch, self.get_num_updates()
                 )
-            )
 
         else:
-            logger.info("No existing checkpoint found {}".format(filename))
+            logger.info("No existing checkpoint found %s", filename)
 
         return extra_state
 
@@ -697,7 +724,7 @@ class Trainer(object):
     ):
         """Return an EpochBatchIterator over the training set for a given epoch."""
         if load_dataset:
-            logger.info("loading train data for epoch {}".format(epoch))
+            logger.info("loading train data for epoch %d", epoch)
             self.task.load_dataset(
                 self.cfg.dataset.train_subset,
                 epoch=epoch,
@@ -764,7 +791,7 @@ class Trainer(object):
 
     def begin_epoch(self, epoch):
         """Called at the beginning of each epoch."""
-        logger.info("begin training epoch {}".format(epoch))
+        logger.info("begin training epoch %d", epoch)
 
         self.lr_step_begin_epoch(epoch)
 
@@ -774,11 +801,6 @@ class Trainer(object):
         # task specific setup per epoch
         self.task.begin_epoch(epoch, self.get_model())
 
-        if self.tpu:
-            import torch_xla.core.xla_model as xm
-
-            xm.rendezvous("begin_epoch")  # wait for all workers
-            xm.mark_step()
 
     def begin_valid_epoch(self, epoch):
         """Called at the beginning of each validation epoch."""
@@ -787,6 +809,7 @@ class Trainer(object):
         self.task.begin_valid_epoch(epoch, self.get_model())
 
     def reset_dummy_batch(self, batch):
+        """Set dummy batch to be used when preparing batches."""
         self._dummy_batch = batch
 
     @metrics.aggregate("train")
@@ -818,7 +841,7 @@ class Trainer(object):
 
         # forward and backward pass
         logging_outputs, sample_size, ooms = [], 0, 0
-        for i, sample in enumerate(samples):  # delayed update loop
+        for idx, sample in enumerate(samples):  # delayed update loop
             sample, is_dummy_batch = self._prepare_sample(sample)
 
             def maybe_no_sync():
@@ -830,7 +853,7 @@ class Trainer(object):
                 if (
                     self.data_parallel_world_size > 1
                     and hasattr(self.model, "no_sync")
-                    and i < len(samples) - 1
+                    and idx < len(samples) - 1
                     # The no_sync context manager results in increased memory
                     # usage with FSDP, since full-size gradients will be
                     # accumulated on each GPU. It's typically a better tradeoff
@@ -864,11 +887,11 @@ class Trainer(object):
                 # reduce the chance of OOM
                 if self.cuda and self.get_num_updates() == 0:
                     torch.cuda.empty_cache()
-            except RuntimeError as e:
-                if "out of memory" in str(e):
-                    self._log_oom(e)
+            except RuntimeError as err:
+                if "out of memory" in str(err):
+                    self._log_oom(err)
                     if raise_oom:
-                        raise e
+                        raise err
                     logger.warning(
                         "attempting to recover from OOM in forward/backward pass"
                     )
@@ -879,7 +902,7 @@ class Trainer(object):
                     if self.cfg.distributed_training.distributed_world_size == 1:
                         return None
                 else:
-                    raise e
+                    raise err
             except Exception:
                 self.consolidate_optimizer()
                 self.save_checkpoint(
@@ -887,7 +910,7 @@ class Trainer(object):
                 )
                 raise
 
-            if self.tpu and i < len(samples) - 1:
+            if self.tpu and idx < len(samples) - 1:
                 # tpu-comment: every XLA operation before marking step is
                 # appended to the IR graph, and processing too many batches
                 # before marking step can lead to OOM errors.
@@ -972,10 +995,10 @@ class Trainer(object):
                         raise FloatingPointError("gradients are Nan/Inf")
 
             if not scoring:
-                # Freeze selected paramters to prune 
+                # Freeze selected paramters to prune
                 if self.model.phase == 'pruning':
                     self.optimizer._optimizer.remove_grads(_model=self.model)
-                                
+
                 with torch.autograd.profiler.record_function("optimizer"):
                     # take an optimization step
                     self.task.optimizer_step(
@@ -1014,18 +1037,18 @@ class Trainer(object):
                         **extra_kwargs,
                     )
             raise
-        except OverflowError as e:
+        except OverflowError as err:
             overflow = True
             logger.info(
-                f"NOTE: gradient overflow detected, ignoring gradient, {str(e)}"
+                "NOTE: gradient overflow detected, ignoring gradient, %s", str(err)
             )
             grad_norm = torch.tensor(0.0).cuda()
             self.zero_grad()
-        except RuntimeError as e:
-            if "out of memory" in str(e):
-                self._log_oom(e)
+        except RuntimeError as err:
+            if "out of memory" in str(err):
+                self._log_oom(err)
                 logger.error("OOM during optimization, irrecoverable")
-            raise e
+            raise err
 
         # Some distributed wrappers (e.g., SlowMo) need access to the optimizer
         # after the step
@@ -1053,36 +1076,35 @@ class Trainer(object):
                 )
 
             if self.tpu:
-                import torch_xla.core.xla_model as xm
+                pass
+                # # mark step on TPUs
+                # self._xla_markstep_and_send_to_cpu()
 
-                # mark step on TPUs
-                self._xla_markstep_and_send_to_cpu()
+                # # only log stats every log_interval steps
+                # # this causes wps to be misreported when log_interval > 1
+                # logging_output = {}
+                # if self.get_num_updates() % self.cfg.common.log_interval == 0:
+                #     # log memory usage
+                #     mem_info = xm.get_memory_info(self.device)
+                #     gb_free = mem_info["kb_free"] / 1024 / 1024
+                #     gb_total = mem_info["kb_total"] / 1024 / 1024
+                #     metrics.log_scalar(
+                #         "gb_free", gb_free, priority=1500, round=1, weight=0
+                #     )
+                #     metrics.log_scalar(
+                #         "gb_total", gb_total, priority=1600, round=1, weight=0
+                #     )
+                #     logging_outputs = self._xla_markstep_and_send_to_cpu(
+                #         logging_outputs
+                #     )
+                #     logging_output = self._reduce_and_log_stats(
+                #         logging_outputs, sample_size, grad_norm
+                #     )
 
-                # only log stats every log_interval steps
-                # this causes wps to be misreported when log_interval > 1
-                logging_output = {}
-                if self.get_num_updates() % self.cfg.common.log_interval == 0:
-                    # log memory usage
-                    mem_info = xm.get_memory_info(self.device)
-                    gb_free = mem_info["kb_free"] / 1024 / 1024
-                    gb_total = mem_info["kb_total"] / 1024 / 1024
-                    metrics.log_scalar(
-                        "gb_free", gb_free, priority=1500, round=1, weight=0
-                    )
-                    metrics.log_scalar(
-                        "gb_total", gb_total, priority=1600, round=1, weight=0
-                    )
-                    logging_outputs = self._xla_markstep_and_send_to_cpu(
-                        logging_outputs
-                    )
-                    logging_output = self._reduce_and_log_stats(
-                        logging_outputs, sample_size, grad_norm
-                    )
-
-                # log whenever there's an XLA compilation, since these
-                # slow down training and may indicate opportunities for
-                # optimization
-                self._check_xla_compilation()
+                # # log whenever there's an XLA compilation, since these
+                # # slow down training and may indicate opportunities for
+                # # optimization
+                # self._check_xla_compilation()
             else:
                 if self.cuda and self.cuda_env is not None:
                     # log minimum free memory over the iteration
@@ -1129,10 +1151,8 @@ class Trainer(object):
     @metrics.aggregate("valid")
     def valid_step(self, sample, raise_oom=False):
         """Do forward pass in evaluation mode."""
-        if self.tpu:
-            import torch_xla.core.xla_model as xm
-
-            xm.rendezvous("valid_step")  # wait for all workers
+        # if self.tpu:
+        #     xm.rendezvous("valid_step")  # wait for all workers
 
         # If EMA is enabled through store_ema=True
         # and task.uses_ema is True, pass the EMA model as a keyword
@@ -1151,20 +1171,20 @@ class Trainer(object):
                 _loss, sample_size, logging_output = self.task.valid_step(
                     sample, self.model, self.criterion, **extra_kwargs
                 )
-            except RuntimeError as e:
-                if "out of memory" in str(e):
-                    self._log_oom(e)
+            except RuntimeError as err:
+                if "out of memory" in str(err):
+                    self._log_oom(err)
                     if not raise_oom:
                         logger.warning(
                             "ran out of memory in validation step, retrying batch"
                         )
-                        for p in self.model.parameters():
-                            if p.grad is not None:
-                                p.grad = None  # free some memory
+                        for param in self.model.parameters():
+                            if param.grad is not None:
+                                param.grad = None  # free some memory
                         if self.cuda:
                             torch.cuda.empty_cache()
                         return self.valid_step(sample, raise_oom=True)
-                raise e
+                raise err
 
             logging_outputs = [logging_output]
             if is_dummy_batch:
@@ -1189,6 +1209,7 @@ class Trainer(object):
         return logging_output
 
     def zero_grad(self):
+        """Zero out optimizer."""
         self.optimizer.zero_grad()
 
     def lr_step_begin_epoch(self, epoch):
@@ -1207,8 +1228,8 @@ class Trainer(object):
         """Update the learning rate after each update."""
         new_lr = self.lr_scheduler.step_update(self.get_num_updates())
         if isinstance(new_lr, dict):
-            for k, v in new_lr.items():
-                metrics.log_scalar(f"lr_{k}", v, weight=0, priority=300)
+            for key, value in new_lr.items():
+                metrics.log_scalar(f"lr_{key}", value, weight=0, priority=300)
             new_lr = new_lr.get("default", next(iter(new_lr.values())))
         else:
             metrics.log_scalar("lr", new_lr, weight=0, priority=300)
@@ -1228,8 +1249,6 @@ class Trainer(object):
 
     def get_meter(self, name):
         """[deprecated] Get a specific meter by name."""
-        from fairseq import meters
-
         if "get_meter" not in self._warn_once:
             self._warn_once.add("get_meter")
             utils.deprecation_warning(
@@ -1245,22 +1264,22 @@ class Trainer(object):
         elif name == "train_nll_loss":
             # support for legacy train.py, which assumed this meter is
             # always initialized
-            m = train_meters.get("nll_loss", None)
-            return m or meters.AverageMeter()
+            metric = train_meters.get("nll_loss", None)
+            return metric or meters.AverageMeter()
         elif name == "wall":
             # support for legacy train.py, which assumed this meter is
             # always initialized
-            m = metrics.get_meter("default", "wall")
-            return m or meters.TimeMeter()
+            metric = metrics.get_meter("default", "wall")
+            return metric or meters.TimeMeter()
         elif name == "wps":
-            m = metrics.get_meter("train", "wps")
-            return m or meters.TimeMeter()
+            metric = metrics.get_meter("train", "wps")
+            return metric or meters.TimeMeter()
         elif name in {"valid_loss", "valid_nll_loss"}:
             # support for legacy train.py, which assumed these meters
             # are always initialized
             k = name[len("valid_") :]
-            m = metrics.get_meter("valid", k)
-            return m or meters.AverageMeter()
+            metric = metrics.get_meter("valid", k)
+            return metric or meters.AverageMeter()
         elif name == "oom":
             return meters.AverageMeter()
         elif name in train_meters:
@@ -1280,6 +1299,7 @@ class Trainer(object):
         metrics.log_scalar("num_updates", self._num_updates, weight=0, priority=200)
 
     def clip_grad_norm(self, clip_norm):
+        """Clip grad norm and return the total grad norm."""
         def agg_norm_fn(total_norm):
             total_norm = total_norm.cuda().float() ** 2
             total_norm = distributed_utils.all_reduce(
@@ -1296,6 +1316,7 @@ class Trainer(object):
         )
 
     def cumulative_training_time(self):
+        """Return the cumulative training time in seconds."""
         if self._cumulative_training_time is None:
             # single GPU
             return self._local_cumulative_training_time()
@@ -1307,15 +1328,18 @@ class Trainer(object):
         return time.time() - self._start_time + self._previous_training_time
 
     def _fp_convert_sample(self, sample):
-        def apply_half(t):
-            if t.dtype is torch.float32:
-                return t.to(dtype=torch.half)
-            return t
+        """Convert sample to desired floating point format."""
+        def apply_half(_input):
+            """If the input is fp32, convert to fp16."""
+            if _input.dtype is torch.float32:
+                return _input.to(dtype=torch.half)
+            return _input
 
-        def apply_bfloat16(t):
-            if t.dtype is torch.float32:
-                return t.to(dtype=torch.bfloat16)
-            return t
+        def apply_bfloat16(_input):
+            """If the input is fp32, convert to bf16."""
+            if _input.dtype is torch.float32:
+                return _input.to(dtype=torch.bfloat16)
+            return _input
 
         if self.cfg.common.fp16:
             sample = utils.apply_to_sample(apply_half, sample)
@@ -1326,8 +1350,9 @@ class Trainer(object):
         return sample
 
     def _prepare_sample(self, sample, is_dummy=False):
+        """Move sample to correct device and compute FP16/FP32 conversions if necessary."""
         if sample == "DUMMY":
-            raise Exception(
+            raise ValueError(
                 "Trying to use an uninitialized 'dummy' batch. This usually indicates "
                 "that the total number of batches is smaller than the number of "
                 "participating GPUs. Try reducing the batch size or using fewer GPUs."
@@ -1336,7 +1361,7 @@ class Trainer(object):
         if sample is None or len(sample) == 0:
             assert (
                 self._dummy_batch is not None and len(self._dummy_batch) > 0
-            ), "Invalid dummy batch: {}".format(self._dummy_batch)
+            ), f"Invalid dummy batch: {self._dummy_batch}"
             sample, _ = self._prepare_sample(self._dummy_batch, is_dummy=True)
             return sample, True
 
@@ -1368,14 +1393,18 @@ class Trainer(object):
         return sample, False
 
     def _set_seed(self):
-        # Set seed based on args.seed and the update number so that we get
-        # reproducible results when resuming from checkpoints
+        """
+        Set seed based on args.seed and the update number so that we get
+        reproducible results when resuming from checkpoints
+        """
         seed = self.cfg.common.seed + self.get_num_updates()
         utils.set_torch_seed(seed)
 
     def _sync_stats(self):
-        # Return True if it's using multiple GPUs and DDP or multiple GPUs with
-        # BMUF and it's a bmuf sync with warmup iterations completed before.
+        """
+        Return True if it's using multiple GPUs and DDP or multiple GPUs with
+        BMUF and it's a bmuf sync with warmup iterations completed before.
+        """
         if self.data_parallel_world_size == 1:
             return False
         elif self.cfg.optimization.use_bmuf:
@@ -1388,7 +1417,8 @@ class Trainer(object):
             return True
 
     def _log_oom(self, exc):
-        msg = "OOM: Ran out of memory with exception: {}".format(exc)
+        """Log OOM exception."""
+        msg = f"OOM: Ran out of memory with exception: {exc}"
         logger.warning(msg)
         if torch.cuda.is_available() and hasattr(torch.cuda, "memory_summary"):
             for device_idx in range(torch.cuda.device_count()):
@@ -1455,13 +1485,13 @@ class Trainer(object):
             data["extra_stats_" + str(i)] = stat
         if len(logging_outputs) > 0:
             log_keys = list(logging_outputs[0].keys())
-            for k in log_keys:
+            for key in log_keys:
                 if not ignore:
-                    v = sum(log[k] for log in logging_outputs if k in log)
+                    value = sum(log[key] for log in logging_outputs if key in log)
                 else:
-                    v = logging_outputs[0][k]
-                    v = torch.zeros_like(v) if torch.is_tensor(v) else 0
-                data["logging_outputs_" + k] = v
+                    value = logging_outputs[0][key]
+                    value = torch.zeros_like(value) if torch.is_tensor(value) else 0
+                data["logging_outputs_" + key] = value
         else:
             log_keys = None
 
@@ -1500,12 +1530,10 @@ class Trainer(object):
 
             if not is_consistent(self._grad_norm_buf):
                 pretty_detail = "\n".join(
-                    "rank {:3d} = {:.8f}".format(r, n)
+                    f"rank {r:3d} = {n:.8f}"
                     for r, n in enumerate(self._grad_norm_buf.tolist())
                 )
-                error_detail = "grad_norm across the workers:\n{}\n".format(
-                    pretty_detail
-                )
+                error_detail = f"grad_norm across the workers:\n{pretty_detail}\n"
                 # use FloatingPointError to trigger NanDetector
                 raise FloatingPointError(
                     "Fatal error: gradients are inconsistent between workers. "
@@ -1513,11 +1541,12 @@ class Trainer(object):
                     "Or are you mixing up different generation of GPUs in training?"
                     + "\n"
                     + "-" * 80
-                    + "\n{}\n".format(error_detail)
+                    + f"\n{error_detail}\n"
                     + "-" * 80
                 )
 
     def _reduce_and_log_stats(self, logging_outputs, sample_size, grad_norm=None):
+        """Reduce logging outputs across workers and log to tensorboard."""
         if grad_norm is not None and (
             not torch.is_tensor(grad_norm) or torch.isfinite(grad_norm)
         ):
@@ -1561,33 +1590,29 @@ class Trainer(object):
                         del logging_output[key_to_delete]
             return logging_output
 
-    def _check_xla_compilation(self):
-        import torch_xla.debug.metrics as met
-
-        compile_stats = met.metric_data("CompileTime")
-        if compile_stats is None:
-            return
-        num_xla_compiles = compile_stats[0]
-        if num_xla_compiles > self._num_xla_compiles:
-            logger.warning(
-                "XLA compilation detected on device #{}; too many of these can lead "
-                "to slow training, but we expect a few in the beginning".format(
-                    self.cfg.distributed_training.distributed_rank
-                )
-            )
-        self._num_xla_compiles = num_xla_compiles
+    # def _check_xla_compilation(self):
+    #     """Check if XLA compilation is detected and log warning"""
+    #     compile_stats = met.metric_data("CompileTime")
+    #     if compile_stats is None:
+    #         return
+    #     num_xla_compiles = compile_stats[0]
+    #     if num_xla_compiles > self._num_xla_compiles:
+    #         logger.warning(
+    #             "XLA compilation detected on device #%s; too many of these can lead "
+    #             "to slow training, but we expect a few in the beginning",
+    #                 self.cfg.distributed_training.distributed_rank
+    #                 )
+    #     self._num_xla_compiles = num_xla_compiles
 
     def _xla_markstep_and_send_to_cpu(self, data=None):
-        import torch_xla.core.xla_model as xm
-
-        xm.mark_step()
+    #     """Mark step on XLA and send data to CPU."""
+    #     xm.mark_step()
         if data is not None:
-            from fairseq.utils import xla_device_to_cpu
-
             return xla_device_to_cpu(data)
 
 
 def _catalog_shared_params(module, memo=None, prefix=""):
+    """Catalog all shared parameters in the module hierarchy."""
     if memo is None:
         first_call = True
         memo = {}
@@ -1598,11 +1623,11 @@ def _catalog_shared_params(module, memo=None, prefix=""):
         if param not in memo:
             memo[param] = []
         memo[param].append(param_prefix)
-    for name, m in module._modules.items():
-        if m is None:
+    for name, _module in module._modules.items():
+        if _module is None:
             continue
         submodule_prefix = prefix + ("." if prefix else "") + name
-        _catalog_shared_params(m, memo, submodule_prefix)
+        _catalog_shared_params(_module, memo, submodule_prefix)
     if first_call:
         return [x for x in memo.values() if len(x) > 1]
 

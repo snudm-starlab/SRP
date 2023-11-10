@@ -30,15 +30,17 @@ import numpy as np
 import torch
 from omegaconf import DictConfig
 
-import checkpoint_utils
 from fairseq import options, scoring, tasks, utils
 from fairseq.dataclass.utils import convert_namespace_to_omegaconf
 from fairseq.logging import progress_bar
 from fairseq.logging.meters import StopwatchMeter, TimeMeter
-from flops_counter import FLOPS_COUNTER
+
+from src import checkpoint_utils
+from src.flops_counter import FlopsCounter
 
 
 def main(cfg: DictConfig):
+    """Main function for generation."""
 
     if isinstance(cfg, Namespace):
         cfg = convert_namespace_to_omegaconf(cfg)
@@ -55,15 +57,16 @@ def main(cfg: DictConfig):
         os.makedirs(cfg.common_eval.results_path, exist_ok=True)
         output_path = os.path.join(
             cfg.common_eval.results_path,
-            "generate-{}.txt".format(cfg.dataset.gen_subset),
+            f"generate-{cfg.dataset.gen_subset}.txt",
         )
-        with open(output_path, "w", buffering=1, encoding="utf-8") as h:
-            return _main(cfg, h)
+        with open(output_path, "w", buffering=1, encoding="utf-8") as file:
+            return _main(cfg, file)
     else:
         return _main(cfg, sys.stdout)
 
 
 def get_symbols_to_strip_from_output(generator):
+    """Return a set of symbols to strip from the output."""
     if hasattr(generator, "symbols_to_strip_from_output"):
         return generator.symbols_to_strip_from_output
     else:
@@ -105,7 +108,7 @@ def _main(cfg: DictConfig, output_file):
     overrides = ast.literal_eval(cfg.common_eval.model_overrides)
 
     # Load ensemble
-    logger.info("loading model(s) from {}".format(cfg.common_eval.path))
+    logger.info("loading model(s) from %s", cfg.common_eval.path)
     models, saved_cfg = checkpoint_utils.load_model_ensemble(
         utils.split_paths(cfg.common_eval.path),
         arg_overrides=overrides,
@@ -113,9 +116,10 @@ def _main(cfg: DictConfig, output_file):
         suffix=cfg.checkpoint.checkpoint_suffix,
         strict=(cfg.checkpoint.checkpoint_shard_count == 1),
         num_shards=cfg.checkpoint.checkpoint_shard_count,
-    )    
+    )
 
-    # loading the dataset should happen after the checkpoint has been loaded so we can give it the saved task config
+    # loading the dataset should happen after the checkpoint has been loaded
+    # so we can give it the saved task config
     task.load_dataset(cfg.dataset.gen_subset, task_cfg=saved_cfg.task)
 
     if cfg.generation.lm_path is not None:
@@ -127,8 +131,8 @@ def _main(cfg: DictConfig, output_file):
             )
         except:
             logger.warning(
-                f"Failed to load language model! Please make sure that the language model dict is the same "
-                f"as target dict and is located in the data dir ({cfg.task.data})"
+                "Failed to load language model! Please make sure that the language model dict"
+                "is the same as target dict and is located in the data dir %s", cfg.task.data
             )
             raise
 
@@ -185,12 +189,12 @@ def _main(cfg: DictConfig, output_file):
     tokenizer = task.build_tokenizer(cfg.tokenizer)
     bpe = task.build_bpe(cfg.bpe)
 
-    def decode_fn(x):
+    def decode_fn(input_str):
         if bpe is not None:
-            x = bpe.decode(x)
+            input_str = bpe.decode(input_str)
         if tokenizer is not None:
-            x = tokenizer.decode(x)
-        return x
+            input_str = tokenizer.decode(input_str)
+        return input_str
 
     scorer = scoring.build_scorer(cfg.scoring, tgt_dict)
 
@@ -267,9 +271,9 @@ def _main(cfg: DictConfig, output_file):
 
             if not cfg.common_eval.quiet:
                 if src_dict is not None:
-                    print("S-{}\t{}".format(sample_id, src_str), file=output_file)
+                    print(f"S-{sample_id}\t{src_str}", file=output_file)
                 if has_target:
-                    print("T-{}\t{}".format(sample_id, target_str), file=output_file)
+                    print(f"T-{sample_id}\t{target_str}", file=output_file)
 
             # Process top predictions
             for j, hypo in enumerate(hypos[i][: cfg.generation.nbest]):
@@ -287,74 +291,46 @@ def _main(cfg: DictConfig, output_file):
                     score = hypo["score"] / math.log(2)  # convert to base 2
                     # original hypothesis (after tokenization and BPE)
                     print(
-                        "H-{}\t{}\t{}".format(sample_id, score, hypo_str),
+                        f"H-{sample_id}\t{score}\t{hypo_str}",
                         file=output_file,
                     )
                     # detokenized hypothesis
                     print(
-                        "D-{}\t{}\t{}".format(sample_id, score, detok_hypo_str),
+                        f"D-{sample_id}\t{score}\t{detok_hypo_str}",
                         file=output_file,
                     )
+                    # convert from base e to base 2
+                    _tmp =[f'{x:.4f}' for x in hypo['positional_scores'].div_(math.log(2)).tolist()]
+                    _tmp = ' '.join(_tmp)
                     print(
-                        "P-{}\t{}".format(
-                            sample_id,
-                            " ".join(
-                                map(
-                                    lambda x: "{:.4f}".format(x),
-                                    # convert from base e to base 2
-                                    hypo["positional_scores"]
-                                    .div_(math.log(2))
-                                    .tolist(),
-                                )
-                            ),
-                        ),
+                        f"P-{sample_id}\t{_tmp}",
                         file=output_file,
                     )
 
                     if cfg.generation.print_alignment == "hard":
+                        _tmp = ' '.join([f'{src_idx}-{tgt_idx}' for src_idx, tgt_idx in alignment])
                         print(
-                            "A-{}\t{}".format(
-                                sample_id,
-                                " ".join(
-                                    [
-                                        "{}-{}".format(src_idx, tgt_idx)
-                                        for src_idx, tgt_idx in alignment
-                                    ]
-                                ),
-                            ),
-                            file=output_file,
-                        )
+                            f"A-{sample_id}\t{_tmp}",
+                                    file=output_file)
+
                     if cfg.generation.print_alignment == "soft":
-                        print(
-                            "A-{}\t{}".format(
-                                sample_id,
-                                " ".join(
-                                    [",".join(src_probs) for src_probs in alignment]
-                                ),
-                            ),
-                            file=output_file,
-                        )
+                        _tmp = " ".join([",".join(src_probs) for src_probs in alignment])
+                        print(f"A-{sample_id}\t{_tmp}", file=output_file)
 
                     if cfg.generation.print_step:
-                        print(
-                            "I-{}\t{}".format(sample_id, hypo["steps"]),
-                            file=output_file,
-                        )
+                        print(f"I-{sample_id}\t{hypo['steps']}", file=output_file)
 
                     if cfg.generation.retain_iter_history:
-                        for step, h in enumerate(hypo["history"]):
+                        for step, his in enumerate(hypo["history"]):
                             _, h_str, _ = utils.post_process_prediction(
-                                hypo_tokens=h["tokens"].int().cpu(),
+                                hypo_tokens=his["tokens"].int().cpu(),
                                 src_str=src_str,
                                 alignment=None,
                                 align_dict=None,
                                 tgt_dict=tgt_dict,
                                 remove_bpe=None,
                             )
-                            print(
-                                "E-{}_{}\t{}".format(sample_id, step, h_str),
-                                file=output_file,
-                            )
+                            print(f"E-{sample_id}_{step}\t{h_str}", file=output_file)
 
                 # Score only the top hypothesis
                 if has_target and j == 0:
@@ -362,7 +338,7 @@ def _main(cfg: DictConfig, output_file):
                         align_dict is not None
                         or cfg.common_eval.post_process is not None
                     ):
-                        # Convert back to tokens for evaluation with unk replacement and/or without BPE
+                        # Convert back to tokens for evaluation w/ unk replacement and/or w/o BPE
                         target_tokens = tgt_dict.encode_line(
                             target_str, add_if_not_exist=True
                         )
@@ -381,41 +357,38 @@ def _main(cfg: DictConfig, output_file):
         )
 
     logger.info("NOTE: hypothesis and token scores are output in base 2")
-    logger.info(
-        "Translated {:,} sentences ({:,} tokens) in {:.1f}s ({:.2f} sentences/s, {:.2f} tokens/s)".format(
-            num_sentences,
-            gen_timer.n,
-            gen_timer.sum,
-            num_sentences / gen_timer.sum,
-            1.0 / gen_timer.avg,
-        )
-    )
+    logger.info("Translated %d sentences (%d tokens) in %.1f}s (%.2f sentences/s, %.2f tokens/s)",
+        num_sentences, gen_timer.n, gen_timer.sum, num_sentences/gen_timer.sum, 1./gen_timer.avg)
+
     if has_target:
         if cfg.bpe and not cfg.generation.sacrebleu:
             if cfg.common_eval.post_process:
                 logger.warning(
-                    "BLEU score is being computed by splitting detokenized string on spaces, this is probably not what you want. Use --sacrebleu for standard 13a BLEU tokenization"
+                    "BLEU score is being computed by splitting detokenized string on spaces, "
+                    "this is probably not what you want. "
+                    "Use --sacrebleu for standard 13a BLEU tokenization"
                 )
             else:
                 logger.warning(
-                    "If you are using BPE on the target side, the BLEU score is computed on BPE tokens, not on proper words.  Use --sacrebleu for standard 13a BLEU tokenization"
+                    "If you are using BPE on the target side, "
+                    "the BLEU score is computed on BPE tokens, "
+                    "not on proper words.  Use --sacrebleu for standard 13a BLEU tokenization"
                 )
         # use print to be consistent with other main outputs: S-, H-, T-, D- and so on
         print(
-            "Generate {} with beam={}: {}".format(
-                cfg.dataset.gen_subset, cfg.generation.beam, scorer.result_string()
-            ),
+            f"Generate {cfg.dataset.gen_subset} with beam={cfg.generation.beam}:"
+            f"{scorer.result_string()}",
             file=output_file,
         )
 
     # print the number of parameters and FLOPs
     num_params = np.sum([_p.numel() for _p in models[0].parameters() if _p.requires_grad])
     param_dict = models[0].state_dict()
-    s = 50
+    seq_len = 50
     heads = 4
     num_layers = 6
-    emb = param_dict[f'encoder.embedding_c'].shape[0]
-    en_self_qks = [param_dict[f'encoder.layers.{l}.self_attn_qk_c'].shape[0] 
+    emb = param_dict['encoder.embedding_c'].shape[0]
+    en_self_qks = [param_dict[f'encoder.layers.{l}.self_attn_qk_c'].shape[0]
             for l in range(num_layers)]
     en_self_vos = [param_dict[f'encoder.layers.{l}.self_attn_vo_c'].shape[0]
             for l in range(num_layers)]
@@ -432,13 +405,13 @@ def _main(cfg: DictConfig, output_file):
     de_fcs = [param_dict[f'decoder.layers.{l}.fc_c'].shape[0] for l in range(num_layers)]
 
     tar_dict_size = 6632
-    
-    flops = FLOPS_COUNTER(s, emb, heads,
+
+    flops = FlopsCounter(seq_len, emb, heads,
                 en_self_qks, en_self_vos, en_fcs,
                 de_self_qks, de_self_vos, de_fcs,
                 de_encoder_qks, de_encoder_vos,
                 tar_dict_size).get_model_flops()
- 
+
     print(f"* Number of params: {num_params/1e6:.3f}M")
     print(f"* FLOPs: {flops/1e9:.3f}G")
     print(f"* {scorer.result_string().split(',')[0]}")
@@ -446,8 +419,8 @@ def _main(cfg: DictConfig, output_file):
 
 
 def cli_main():
+    """Main function."""
     parser = options.get_generation_parser()
-    # TODO: replace this workaround with refactoring of `AudioPretraining`
     parser.add_argument(
         "--arch",
         "-a",

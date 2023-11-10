@@ -1,19 +1,20 @@
-################################################################################
-# Starlab Transformer Compression with SRP (Selectively Regularized Pruning)
-#
-# Author: Hyojin Jeon (tarahjjeon@snu.ac.kr), Seoul National University
-#         Seungcheol Park (ant6si@snu.ac.kr), Seoul National University
-#         U Kang (ukang@snu.ac.kr), Seoul National University
-#
-# Version : 1.0
-# Date : Nov 29, 2022
-# Main Contact: Hyojin Jeon
-#
-# This software is free of charge under research purposes.
-# For commercial purposes, please contact the authors.
-# This code is mainly based on the [GitHub Repository]
-# [GitHub Repository]: https://github.com/facebookresearch/fairseq
-################################################################################
+"""
+Starlab Transformer Compression with SRP (Selectively Regularized Pruning)
+
+Author: Hyojin Jeon (tarahjjeon@snu.ac.kr), Seoul National University
+        Seungcheol Park (ant6si@snu.ac.kr), Seoul National University
+        U Kang (ukang@snu.ac.kr), Seoul National University
+
+Version : 1.0
+Date : Nov 29, 2022
+Main Contact: Hyojin Jeon
+
+This software is free of charge under research purposes.
+For commercial purposes, please contact the authors.
+This code is mainly based on the [GitHub Repository]
+[GitHub Repository]: https://github.com/facebookresearch/fairseq
+"""
+# pylint: disable=E1101, R0902, R0913, R0914
 
 import math
 from dataclasses import dataclass, field
@@ -23,12 +24,13 @@ from fairseq import metrics, utils
 from fairseq.criterions import FairseqCriterion, register_criterion
 from fairseq.dataclass import FairseqDataclass
 from omegaconf import II
-import torch.nn as nn
+from torch import nn
 import torch.nn.functional as F
 
 
 @dataclass
 class SRPCriterionConfig(FairseqDataclass):
+    """Configuration for `SRPCriterion`."""
     label_smoothing: float = field(
         default=0.0,
         metadata={"help": "epsilon for label smoothing, 0 means no label smoothing"},
@@ -44,6 +46,7 @@ class SRPCriterionConfig(FairseqDataclass):
     sentence_avg: bool = II("optimization.sentence_avg")
 
 def label_smoothed_nll_loss(lprobs, target, epsilon, ignore_index=None, reduce=True):
+    """Calculate the label smoothed NLL loss"""
     if target.dim() == lprobs.dim() - 1:
         target = target.unsqueeze(-1)
     nll_loss = -lprobs.gather(dim=-1, index=target)
@@ -67,6 +70,7 @@ def label_smoothed_nll_loss(lprobs, target, epsilon, ignore_index=None, reduce=T
     "srp", dataclass=SRPCriterionConfig
 )
 class SRPCriterion(FairseqCriterion):
+    """SRP (Selectively Regularized Pruning) Criterion"""
     def __init__(
         self,
         task,
@@ -81,10 +85,11 @@ class SRPCriterion(FairseqCriterion):
         self.ignore_prefix_size = ignore_prefix_size
         self.report_accuracy = report_accuracy
 
-    def prob_kd_loss(self, student_logits, teacher_logits, T, reduction_kd='sum'):
-        
-        kd_loss = nn.KLDivLoss(reduction='sum')(F.log_softmax(student_logits/T, dim=-1),
-                                                F.softmax(teacher_logits/T, dim=-1)) * T * T
+    def prob_kd_loss(self, student_logits, teacher_logits, temp, reduction_kd='sum'):
+        """Compute the knowledge-distillation (KD) loss given outputs, labels."""
+
+        kd_loss = nn.KLDivLoss(reduction=reduction_kd)(F.log_softmax(student_logits/temp, dim=-1),
+                                            F.softmax(teacher_logits/temp, dim=-1)) * temp * temp
         return kd_loss
 
     def forward(self, model, sample, reduce=True, teacher_model=None):
@@ -99,8 +104,8 @@ class SRPCriterion(FairseqCriterion):
             # Use KD
             sample["net_input"]["use_kd"] = True
             with torch.no_grad():
-                teacher_output, teacher_states = teacher_model(**sample["net_input"])
-            net_output, student_states = model(**sample["net_input"])
+                teacher_output, _ = teacher_model(**sample["net_input"])
+            net_output, _ = model(**sample["net_input"])
         else:
             sample["net_input"]["use_kd"] = False
             net_output = model(**sample["net_input"])
@@ -111,9 +116,9 @@ class SRPCriterion(FairseqCriterion):
         )
 
         if teacher_model is not None:
-            prob_kd = self.prob_kd_loss(student_logits=net_output[0], 
+            prob_kd = self.prob_kd_loss(student_logits=net_output[0],
                                         teacher_logits=teacher_output[0],
-                                        T=model.cfg.T)
+                                        temp=model.cfg.T)
             loss = loss + prob_kd * (model.cfg.prob_kd)
         logging_output = {
             "loss": loss.data,
@@ -129,6 +134,7 @@ class SRPCriterion(FairseqCriterion):
         return loss, sample_size, logging_output
 
     def get_lprobs_and_target(self, model, net_output, sample):
+        """Get log probabilities and targets from the net's output."""
         lprobs = model.get_normalized_probs(net_output, log_probs=True)
         target = model.get_targets(sample, net_output)
         if self.ignore_prefix_size > 0:
@@ -138,6 +144,7 @@ class SRPCriterion(FairseqCriterion):
         return lprobs.view(-1, lprobs.size(-1)), target.view(-1)
 
     def compute_loss(self, model, net_output, sample, reduce=True):
+        """Compute the loss for the given sample"""
         lprobs, target = self.get_lprobs_and_target(model, net_output, sample)
         loss, nll_loss = label_smoothed_nll_loss(
             lprobs,
@@ -149,6 +156,7 @@ class SRPCriterion(FairseqCriterion):
         return loss, nll_loss
 
     def compute_accuracy(self, model, net_output, sample):
+        """Compute the accuracy for the given sample"""
         lprobs, target = self.get_lprobs_and_target(model, net_output, sample)
         mask = target.ne(self.padding_idx)
         n_correct = torch.sum(

@@ -1,32 +1,35 @@
-################################################################################
-# Starlab Transformer Compression with SRP (Selectively Regularized Pruning)
-#
-# Author: Hyojin Jeon (tarahjjeon@snu.ac.kr), Seoul National University
-#         Seungcheol Park (ant6si@snu.ac.kr), Seoul National University
-#         U Kang (ukang@snu.ac.kr), Seoul National University
-#
-# Version : 1.0
-# Date : Nov 29, 2022
-# Main Contact: Hyojin Jeon
-#
-# This software is free of charge under research purposes.
-# For commercial purposes, please contact the authors.
-# This code is mainly based on the [GitHub Repository]
-# [GitHub Repository]: https://github.com/facebookresearch/fairseq
-################################################################################
+"""
+Starlab Transformer Compression with SRP (Selectively Regularized Pruning)
+
+Author: Hyojin Jeon (tarahjjeon@snu.ac.kr), Seoul National University
+        Seungcheol Park (ant6si@snu.ac.kr), Seoul National University
+        U Kang (ukang@snu.ac.kr), Seoul National University
+
+Version : 1.0
+Date : Nov 29, 2022
+Main Contact: Hyojin Jeon
+
+This software is free of charge under research purposes.
+For commercial purposes, please contact the authors.
+This code is mainly based on the [GitHub Repository]
+[GitHub Repository]: https://github.com/facebookresearch/fairseq
+"""
 
 from dataclasses import dataclass, field
 import itertools
 import json
 import logging
 import os
+import inspect
 from typing import Optional
 from argparse import Namespace
 from omegaconf import II
+import sacrebleu
+from sacrebleu.metrics import BLEU
 
 import torch
 import numpy as np
-from fairseq import metrics, utils, search, tokenizer
+from fairseq import metrics, utils, search
 from fairseq.data import (
     AppendTokenDataset,
     ConcatDataset,
@@ -43,6 +46,10 @@ from fairseq.dataclass import ChoiceEnum, FairseqDataclass
 from fairseq.tasks import FairseqTask, register_task
 from fairseq.optim.amp_optimizer import AMPOptimizer
 
+from src.sequence_generator import (
+    SequenceGenerator,
+    SequenceGeneratorWithAlignment,
+)
 
 EVAL_BLEU_ORDER = 4
 
@@ -73,8 +80,9 @@ def load_langpair_dataset(
     pad_to_multiple=1,
     prepend_bos_src=None,
 ):
+    """Load a language pair dataset split."""
     def split_exists(split, src, tgt, lang, data_path):
-        filename = os.path.join(data_path, "{}.{}-{}.{}".format(split, src, tgt, lang))
+        filename = os.path.join(data_path, f"{split}.{src}-{tgt}.{lang}")
         return indexed_dataset.dataset_exists(filename, impl=dataset_impl)
 
     src_datasets = []
@@ -85,16 +93,14 @@ def load_langpair_dataset(
 
         # infer langcode
         if split_exists(split_k, src, tgt, src, data_path):
-            prefix = os.path.join(data_path, "{}.{}-{}.".format(split_k, src, tgt))
+            prefix = os.path.join(data_path, f"{split_k}.{src}-{tgt}.")
         elif split_exists(split_k, tgt, src, src, data_path):
-            prefix = os.path.join(data_path, "{}.{}-{}.".format(split_k, tgt, src))
+            prefix = os.path.join(data_path, f"{split_k}.{tgt}-{src}.")
         else:
             if k > 0:
                 break
             else:
-                raise FileNotFoundError(
-                    "Dataset not found: {} ({})".format(split, data_path)
-                )
+                raise FileNotFoundError(f"Dataset not found: {split} ({data_path})")
 
         src_dataset = data_utils.load_indexed_dataset(
             prefix + src, src_dict, dataset_impl
@@ -116,9 +122,7 @@ def load_langpair_dataset(
             tgt_datasets.append(tgt_dataset)
 
         logger.info(
-            "{} {} {}-{} {} examples".format(
-                data_path, split_k, src, tgt, len(src_datasets[-1])
-            )
+            "%s %s %s-%s %s examples", data_path, split_k, src, tgt, len(src_datasets[-1])
         )
 
         if not combine:
@@ -144,23 +148,23 @@ def load_langpair_dataset(
         if tgt_dataset is not None:
             tgt_dataset = PrependTokenDataset(tgt_dataset, tgt_dict.bos())
     elif prepend_bos_src is not None:
-        logger.info(f"prepending src bos: {prepend_bos_src}")
+        logger.info("prepending src bos: %s", prepend_bos_src)
         src_dataset = PrependTokenDataset(src_dataset, prepend_bos_src)
 
     eos = None
     if append_source_id:
         src_dataset = AppendTokenDataset(
-            src_dataset, src_dict.index("[{}]".format(src))
+            src_dataset, src_dict.index(f"[{src}]")
         )
         if tgt_dataset is not None:
             tgt_dataset = AppendTokenDataset(
-                tgt_dataset, tgt_dict.index("[{}]".format(tgt))
+                tgt_dataset, tgt_dict.index(f"[{tgt}]")
             )
-        eos = tgt_dict.index("[{}]".format(tgt))
+        eos = tgt_dict.index(f"[{tgt}]")
 
     align_dataset = None
     if load_alignments:
-        align_path = os.path.join(data_path, "{}.align.{}-{}".format(split, src, tgt))
+        align_path = os.path.join(data_path, f"{split}.align.{src}-{tgt}")
         if indexed_dataset.dataset_exists(align_path, impl=dataset_impl):
             align_dataset = data_utils.load_indexed_dataset(
                 align_path, None, dataset_impl
@@ -186,10 +190,12 @@ def load_langpair_dataset(
 
 @dataclass
 class SRPTranslationConfig(FairseqDataclass):
+    """Data configuration for translation tasks."""
     data: Optional[str] = field(
         default=None,
         metadata={
-            "help": "colon separated path to data directories list, will be iterated upon during epochs "
+            "help": "colon separated path to data directories list, \
+                will be iterated upon during epochs"
             "in round-robin manner; however, valid and test data are always in the first directory "
             "to avoid the need for repeating them in all directories"
         },
@@ -233,7 +239,8 @@ class SRPTranslationConfig(FairseqDataclass):
         default=0,
         metadata={
             "help": "if >0, then bucket source and target lengths into "
-            "N buckets and pad accordingly; this is useful on TPUs to minimize the number of compilations"
+            "N buckets and pad accordingly; \
+                this is useful on TPUs to minimize the number of compilations"
         },
     )
     train_subset: str = II("dataset.train_subset")
@@ -249,13 +256,15 @@ class SRPTranslationConfig(FairseqDataclass):
     eval_bleu_args: Optional[str] = field(
         default="{}",
         metadata={
-            "help": 'generation args for BLUE scoring, e.g., \'{"beam": 4, "lenpen": 0.6}\', as JSON string'
+            "help": 'generation args for BLUE scoring, e.g.,\
+                \'{"beam": 4, "lenpen": 0.6}\', as JSON string'
         },
     )
     eval_bleu_detok: str = field(
         default="space",
         metadata={
-            "help": "detokenize before computing BLEU (e.g., 'moses'); required if using --eval-bleu; "
+            "help": "detokenize before computing BLEU (e.g., 'moses');\
+                required if using --eval-bleu; "
             "use 'space' to disable detokenization; see fairseq.data.encoders for other options"
         },
     )
@@ -313,22 +322,22 @@ class SRPTranslationTask(FairseqTask):
         if cfg.source_lang is None or cfg.target_lang is None:
             cfg.source_lang, cfg.target_lang = data_utils.infer_language_pair(paths[0])
         if cfg.source_lang is None or cfg.target_lang is None:
-            raise Exception(
+            raise ValueError(
                 "Could not infer language pair, please provide it explicitly"
             )
 
         # load dictionaries
         src_dict = cls.load_dictionary(
-            os.path.join(paths[0], "dict.{}.txt".format(cfg.source_lang))
+            os.path.join(paths[0], f"dict.{cfg.source_lang}.txt")
         )
         tgt_dict = cls.load_dictionary(
-            os.path.join(paths[0], "dict.{}.txt".format(cfg.target_lang))
+            os.path.join(paths[0], f"dict.{cfg.target_lang}.txt")
         )
         assert src_dict.pad() == tgt_dict.pad()
         assert src_dict.eos() == tgt_dict.eos()
         assert src_dict.unk() == tgt_dict.unk()
-        logger.info("[{}] dictionary: {} types".format(cfg.source_lang, len(src_dict)))
-        logger.info("[{}] dictionary: {} types".format(cfg.target_lang, len(tgt_dict)))
+        logger.info("[%s] dictionary: %s types", cfg.source_lang, len(src_dict))
+        logger.info("[%s] dictionary: %s types", cfg.target_lang, len(tgt_dict))
 
         return cls(cfg, src_dict, tgt_dict)
 
@@ -370,6 +379,7 @@ class SRPTranslationTask(FairseqTask):
         )
 
     def build_dataset_for_inference(self, src_tokens, src_lengths, constraints=None):
+        """Generate a batched dataset for the given source tokens."""
         return LanguagePairDataset(
             src_tokens,
             src_lengths,
@@ -411,17 +421,11 @@ class SRPTranslationTask(FairseqTask):
                 https://github.com/facebookresearch/GENRE.
         """
         if getattr(args, "score_reference", False):
-            from fairseq.sequence_scorer import SequenceScorer
 
             return SequenceScorer(
                 self.target_dictionary,
                 compute_alignment=getattr(args, "print_alignment", False),
             )
-
-        from ..sequence_generator import (
-            SequenceGenerator,
-            SequenceGeneratorWithAlignment,
-        )
 
         # Choose search strategy. Defaults to Beam Search.
         sampling = getattr(args, "sampling", False)
@@ -509,6 +513,7 @@ class SRPTranslationTask(FairseqTask):
             **extra_gen_cls_kwargs,
         )
     def build_model(self, cfg, from_checkpoint=False):
+        """Build a new model instance."""
         model = super().build_model(cfg, from_checkpoint)
         if self.cfg.eval_bleu:
             detok_args = json.loads(self.cfg.eval_bleu_detok_args)
@@ -552,8 +557,9 @@ class SRPTranslationTask(FairseqTask):
             model.train()
         model.set_num_updates(update_num)
         with torch.autograd.profiler.record_function("forward"):
-            with torch.cuda.amp.autocast(enabled=(isinstance(optimizer, AMPOptimizer))):
-                loss, sample_size, logging_output = criterion(model, sample, teacher_model=teacher_model)
+            with torch.cuda.amp.autocast(enabled=isinstance(optimizer, AMPOptimizer)):
+                loss, sample_size, logging_output = \
+                    criterion(model, sample, teacher_model=teacher_model)
         if ignore_grad:
             loss *= 0
         with torch.autograd.profiler.record_function("backward"):
@@ -561,6 +567,7 @@ class SRPTranslationTask(FairseqTask):
         return loss, sample_size, logging_output
 
     def valid_step(self, sample, model, criterion):
+        """Do forward and return loss, sample size, and logging outputs"""
         loss, sample_size, logging_output = super().valid_step(sample, model, criterion)
         if self.cfg.eval_bleu:
             bleu = self._inference_with_bleu(self.sequence_generator, sample, model)
@@ -575,11 +582,11 @@ class SRPTranslationTask(FairseqTask):
         return loss, sample_size, logging_output
 
     def reduce_metrics(self, logging_outputs, criterion):
+        """Aggregate logging outputs from data parallel training."""
         super().reduce_metrics(logging_outputs, criterion)
         if self.cfg.eval_bleu:
 
             def sum_logs(key):
-                import torch
 
                 result = sum(log.get(key, 0) for log in logging_outputs)
                 if torch.is_tensor(result):
@@ -599,16 +606,10 @@ class SRPTranslationTask(FairseqTask):
                 metrics.log_scalar("_bleu_ref_len", sum_logs("_bleu_ref_len"))
 
                 def compute_bleu(meters):
-                    import inspect
 
                     try:
-                        from sacrebleu.metrics import BLEU
-
                         comp_bleu = BLEU.compute_bleu
                     except ImportError:
-                        # compatibility API for sacrebleu 1.x
-                        import sacrebleu
-
                         comp_bleu = sacrebleu.compute_bleu
 
                     fn_sig = inspect.getfullargspec(comp_bleu)[0]
@@ -642,10 +643,9 @@ class SRPTranslationTask(FairseqTask):
         return self.tgt_dict
 
     def _inference_with_bleu(self, generator, sample, model):
-        import sacrebleu
 
         def decode(toks, escape_unk=False):
-            s = self.tgt_dict.string(
+            _s = self.tgt_dict.string(
                 toks.int().cpu(),
                 self.cfg.eval_bleu_remove_bpe,
                 # The default unknown string in fairseq is `<unk>`, but
@@ -656,22 +656,22 @@ class SRPTranslationTask(FairseqTask):
                 unk_string=("UNKNOWNTOKENINREF" if escape_unk else "UNKNOWNTOKENINHYP"),
             )
             if self.tokenizer:
-                s = self.tokenizer.decode(s)
-            return s
+                _s = self.tokenizer.decode(_s)
+            return _s
 
         gen_out = self.inference_step(generator, [model], sample, prefix_tokens=None)
         hyps, refs = [], []
-        for i in range(len(gen_out)):
-            hyps.append(decode(gen_out[i][0]["tokens"]))
+        for idx, _ in enumerate(gen_out):
+            hyps.append(decode(gen_out[idx][0]["tokens"]))
             refs.append(
                 decode(
-                    utils.strip_pad(sample["target"][i], self.tgt_dict.pad()),
+                    utils.strip_pad(sample["target"][idx], self.tgt_dict.pad()),
                     escape_unk=True,  # don't count <unk> as matches to the hypo
                 )
             )
         if self.cfg.eval_bleu_print_samples:
-            logger.info("example hypothesis: " + hyps[0])
-            logger.info("example reference: " + refs[0])
+            logger.info("example hypothesis: %s", hyps[0])
+            logger.info("example reference: %s", refs[0])
         if self.cfg.eval_tokenized_bleu:
             return sacrebleu.corpus_bleu(hyps, [refs], tokenize="none")
         else:

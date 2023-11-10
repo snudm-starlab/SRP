@@ -1,30 +1,29 @@
-################################################################################
-# Starlab Transformer Compression with SRP (Selectively Regularized Pruning)
-#
-# Author: Hyojin Jeon (tarahjjeon@snu.ac.kr), Seoul National University
-#         U Kang (ukang@snu.ac.kr), Seoul National University
-#
-# Version : 1.0
-# Date : Nov 29, 2022
-# Main Contact: Hyojin Jeon
-#
-# This software is free of charge under research purposes.
-# For commercial purposes, please contact the authors.
-# This code is mainly based on the [GitHub Repository]
-# [GitHub Repository]: https://github.com/facebookresearch/fairseq
-################################################################################
+"""
+Starlab Transformer Compression with SRP (Selectively Regularized Pruning)
+
+Author: Hyojin Jeon (tarahjjeon@snu.ac.kr), Seoul National University
+        U Kang (ukang@snu.ac.kr), Seoul National University
+
+Version : 1.0
+Date : Nov 29, 2022
+Main Contact: Hyojin Jeon
+
+This software is free of charge under research purposes.
+For commercial purposes, please contact the authors.
+This code is mainly based on the [GitHub Repository]
+[GitHub Repository]: https://github.com/facebookresearch/fairseq
+"""
 
 import math
 from typing import Any, Dict, List, Optional
 
 import torch
-import torch.nn as nn
+from torch import nn
 from torch import Tensor
 
 from fairseq import utils
 from fairseq.distributed import fsdp_wrap
 from fairseq.models import FairseqIncrementalDecoder
-from .srp_config import SRPConfig
 from fairseq.modules import (
     AdaptiveSoftmax,
     BaseLayer,
@@ -33,13 +32,17 @@ from fairseq.modules import (
     PositionalEmbedding,
     SinusoidalPositionalEmbedding,
 )
-from ..modules import srp_layer, LayerNorm
+
 from fairseq.modules.checkpoint_activations import checkpoint_wrapper
 from fairseq.modules.quant_noise import quant_noise as apply_quant_noise_
+
+from .srp_config import SRPConfig
+from ..modules import srp_layer, layer_norm
 
 
 # rewrite name for backward compatibility in `make_generation_fast_`
 def module_name_fordropout(module_name: str) -> str:
+    """Return module name for backward compatibility in `make_generation_fast_`"""
     if module_name == "SRPDecoderBase":
         return "SRPDecoder"
     else:
@@ -100,7 +103,7 @@ class SRPDecoderBase(FairseqIncrementalDecoder):
             self.quant_noise = None
 
         self.project_in_dim = (
-            Linear(input_embed_dim, embed_dim, bias=False)
+            linear_layer(input_embed_dim, embed_dim, bias=False)
             if embed_dim != input_embed_dim
             else None
         )
@@ -119,7 +122,7 @@ class SRPDecoderBase(FairseqIncrementalDecoder):
         self.pos_emb_mask = nn.Parameter(torch.zeros(0), requires_grad=False)
 
         if cfg.layernorm_embedding:
-            self.layernorm_embedding = LayerNorm(embed_dim, export=cfg.export)
+            self.layernorm_embedding = layer_norm(embed_dim, export=cfg.export)
         else:
             self.layernorm_embedding = None
 
@@ -138,12 +141,12 @@ class SRPDecoderBase(FairseqIncrementalDecoder):
         self.num_layers = len(self.layers)
 
         if cfg.decoder.normalize_before and not cfg.no_decoder_final_norm:
-            self.layer_norm = LayerNorm(embed_dim, export=cfg.export)
+            self.layer_norm = layer_norm(embed_dim, export=cfg.export)
         else:
             self.layer_norm = None
 
         self.project_out_dim = (
-            Linear(embed_dim, self.output_embed_dim, bias=False)
+            linear_layer(embed_dim, self.output_embed_dim, bias=False)
             if embed_dim != self.output_embed_dim and not cfg.tie_adaptive_weights
             else None
         )
@@ -154,6 +157,7 @@ class SRPDecoderBase(FairseqIncrementalDecoder):
             self.build_output_projection(cfg, dictionary, embed_tokens)
 
     def build_output_projection(self, cfg, dictionary, embed_tokens):
+        """Build the output projection layer."""
         if cfg.adaptive_softmax_cutoff is not None:
             self.adaptive_softmax = AdaptiveSoftmax(
                 len(dictionary),
@@ -186,6 +190,7 @@ class SRPDecoderBase(FairseqIncrementalDecoder):
             )
 
     def build_decoder_layer(self, cfg, no_encoder_attn=False):
+        """Build a single decoder layer."""
         layer = srp_layer.SRPDecoderLayerBase(cfg, no_encoder_attn)
         checkpoint = cfg.checkpoint_activations
         if checkpoint:
@@ -230,7 +235,7 @@ class SRPDecoderBase(FairseqIncrementalDecoder):
                 - a dictionary with any model-specific outputs
         """
         if use_kd:
-            x, extra, hidden_states = self.extract_features(
+            _input, extra, hidden_states = self.extract_features(
                 prev_output_tokens,
                 encoder_out=encoder_out,
                 incremental_state=incremental_state,
@@ -241,7 +246,7 @@ class SRPDecoderBase(FairseqIncrementalDecoder):
                 use_kd=use_kd,
             )
         else:
-            x, extra = self.extract_features(
+            _input, extra = self.extract_features(
                 prev_output_tokens,
                 encoder_out=encoder_out,
                 incremental_state=incremental_state,
@@ -254,12 +259,12 @@ class SRPDecoderBase(FairseqIncrementalDecoder):
 
         if not features_only:
             if compute_c:
-                x*=self.embedding_c
-            x = self.output_layer(x)
+                _input*=self.embedding_c
+            _input = self.output_layer(_input)
 
         if use_kd:
-            return x, extra, hidden_states
-        return x, extra
+            return _input, extra, hidden_states
+        return _input, extra
 
     def extract_features(
         self,
@@ -272,6 +277,7 @@ class SRPDecoderBase(FairseqIncrementalDecoder):
         compute_c: bool = False,
         use_kd=False,
     ):
+        """return decoder features only without applying output layer."""
         return self.extract_features_scriptable(
             prev_output_tokens,
             encoder_out,
@@ -283,11 +289,11 @@ class SRPDecoderBase(FairseqIncrementalDecoder):
             use_kd=use_kd,
         )
 
-    """
-    A scriptable subclass of this class has an extract_features method and calls
-    super().extract_features, but super() is not supported in torchscript. A copy of
-    this function is made to be used in the subclass instead.
-    """
+
+    # A scriptable subclass of this class has an extract_features method and calls
+    # super().extract_features, but super() is not supported in torchscript. A copy of
+    # this function is made to be used in the subclass instead.
+
 
     def extract_features_scriptable(
         self,
@@ -319,7 +325,7 @@ class SRPDecoderBase(FairseqIncrementalDecoder):
                 - the decoder's features of shape `(batch, tgt_len, embed_dim)`
                 - a dictionary with any model-specific outputs
         """
-        bs, slen = prev_output_tokens.size()
+        # bs, slen = prev_output_tokens.size()
         if alignment_layer is None:
             alignment_layer = self.num_layers - 1
 
@@ -343,45 +349,45 @@ class SRPDecoderBase(FairseqIncrementalDecoder):
                 positions = positions[:, -1:]
 
         # embed tokens and positions
-        x = self.embed_scale * self.embed_tokens(prev_output_tokens)
+        _input = self.embed_scale * self.embed_tokens(prev_output_tokens)
 
         if self.quant_noise is not None:
-            x = self.quant_noise(x)
+            _input = self.quant_noise(_input)
 
         if self.project_in_dim is not None:
-            x = self.project_in_dim(x)
+            _input = self.project_in_dim(_input)
 
         if positions is not None:
-            x += positions[:, :, self.pos_emb_mask]
+            _input += positions[:, :, self.pos_emb_mask]
 
         if self.layernorm_embedding is not None:
-            x = self.layernorm_embedding(x)
+            _input = self.layernorm_embedding(_input)
 
-        x = self.dropout_module(x)
+        _input = self.dropout_module(_input)
 
         if compute_c:
-            x = x * self.embedding_c
+            _input = _input * self.embedding_c
 
 
         # B x T x C -> T x B x C
-        x = x.transpose(0, 1)
+        _input = _input.transpose(0, 1)
 
         self_attn_padding_mask: Optional[Tensor] = None
         if self.cross_self_attention or prev_output_tokens.eq(self.padding_idx).any():
             self_attn_padding_mask = prev_output_tokens.eq(self.padding_idx)
-        
+
         hidden_states = {}
         # decoder layers
         attn: Optional[Tensor] = None
-        inner_states: List[Optional[Tensor]] = [x]
+        inner_states: List[Optional[Tensor]] = [_input]
         for idx, layer in enumerate(self.layers):
             if incremental_state is None and not full_context_alignment:
-                self_attn_mask = self.buffered_future_mask(x)
+                self_attn_mask = self.buffered_future_mask(_input)
             else:
                 self_attn_mask = None
             if not use_kd:
-                x, layer_attn, _ = layer(
-                    x,
+                _input, layer_attn, _ = layer(
+                    _input,
                     enc,
                     padding_mask,
                     incremental_state,
@@ -393,8 +399,8 @@ class SRPDecoderBase(FairseqIncrementalDecoder):
                     compute_c=compute_c,
                 )
             else:
-                x, layer_attn, _, hs = layer(
-                    x,
+                _input, layer_attn, _, _hs = layer(
+                    _input,
                     enc,
                     padding_mask,
                     incremental_state,
@@ -406,13 +412,13 @@ class SRPDecoderBase(FairseqIncrementalDecoder):
                     compute_c=compute_c,
                     use_kd=use_kd,
                 )
-                hidden_states[f'decoder.self_attn.{idx}'] = hs['self_attn']
-                hidden_states[f'decoder.encoder_attn.{idx}'] = hs['encoder_attn']
-                hidden_states[f'decoder.fc.{idx}'] = hs['fc']
+                hidden_states[f'decoder.self_attn.{idx}'] = _hs['self_attn']
+                hidden_states[f'decoder.encoder_attn.{idx}'] = _hs['encoder_attn']
+                hidden_states[f'decoder.fc.{idx}'] = _hs['fc']
 
-            inner_states.append(x)
+            inner_states.append(_input)
             if layer_attn is not None and idx == alignment_layer:
-                attn = layer_attn.float().to(x)
+                attn = layer_attn.float().to(_input)
 
         if attn is not None:
             if alignment_heads is not None:
@@ -422,17 +428,17 @@ class SRPDecoderBase(FairseqIncrementalDecoder):
             attn = attn.mean(dim=0)
 
         if self.layer_norm is not None:
-            x = self.layer_norm(x)
+            _input = self.layer_norm(_input)
 
         # T x B x C -> B x T x C
-        x = x.transpose(0, 1)
+        _input = _input.transpose(0, 1)
 
         if self.project_out_dim is not None:
-            x = self.project_out_dim(x)
+            _input = self.project_out_dim(_input)
         if use_kd:
-            return x, {"attn": [attn], "inner_states": inner_states}, hidden_states
+            return _input, {"attn": [attn], "inner_states": inner_states}, hidden_states
 
-        return x, {"attn": [attn], "inner_states": inner_states}
+        return _input, {"attn": [attn], "inner_states": inner_states}
 
     def output_layer(self, features):
         """Project features to the vocabulary size."""
@@ -449,8 +455,10 @@ class SRPDecoderBase(FairseqIncrementalDecoder):
         return min(self.max_target_positions, self.embed_positions.max_positions)
 
     def buffered_future_mask(self, tensor):
+        """Cached future mask."""
         dim = tensor.size(0)
-        # self._future_mask.device != tensor.device is not working in TorchScript. This is a workaround.
+        # self._future_mask.device != tensor.device is not working in TorchScript.
+        # This is a workaround.
         if (
             self._future_mask.size(0) == 0
             or (not self._future_mask.device == tensor.device)
@@ -465,11 +473,11 @@ class SRPDecoderBase(FairseqIncrementalDecoder):
     def upgrade_state_dict_named(self, state_dict, name):
         """Upgrade a (possibly old) state dict for new versions of fairseq."""
         if isinstance(self.embed_positions, SinusoidalPositionalEmbedding):
-            weights_key = "{}.embed_positions.weights".format(name)
+            weights_key = f"{name}.embed_positions.weights"
             if weights_key in state_dict:
                 del state_dict[weights_key]
             state_dict[
-                "{}.embed_positions._float_tensor".format(name)
+                f"{name}.embed_positions._float_tensor"
             ] = torch.FloatTensor(1)
 
         if f"{name}.output_projection.weight" not in state_dict:
@@ -492,15 +500,15 @@ class SRPDecoderBase(FairseqIncrementalDecoder):
                 "2": "final_layer_norm",
             }
             for old, new in layer_norm_map.items():
-                for m in ("weight", "bias"):
-                    k = "{}.layers.{}.layer_norms.{}.{}".format(name, i, old, m)
+                for _wb in ("weight", "bias"):
+                    k = f"{name}.layers.{i}.layer_norms.{old}.{_wb}"
                     if k in state_dict:
                         state_dict[
-                            "{}.layers.{}.{}.{}".format(name, i, new, m)
+                            f"{name}.layers.{i}.{new}.{_wb}"
                         ] = state_dict[k]
                         del state_dict[k]
 
-        version_key = "{}.version".format(name)
+        version_key = f"{name}.version"
         if utils.item(state_dict.get(version_key, torch.Tensor([1]))[0]) <= 2:
             # earlier checkpoints did not normalize after the stack of layers
             self.layer_norm = None
@@ -510,15 +518,17 @@ class SRPDecoderBase(FairseqIncrementalDecoder):
         return state_dict
 
 
-def Linear(in_features, out_features, bias=True):
-    m = nn.Linear(in_features, out_features, bias)
-    nn.init.xavier_uniform_(m.weight)
+def linear_layer(in_features, out_features, bias=True):
+    """Linear layer"""
+    _module = nn.Linear(in_features, out_features, bias)
+    nn.init.xavier_uniform_(_module.weight)
     if bias:
-        nn.init.constant_(m.bias, 0.0)
-    return m
+        nn.init.constant_(_module.bias, 0.0)
+    return _module
 
 
 class SRPDecoder(SRPDecoderBase):
+    """SRP decoder."""
     def __init__(
         self,
         args,
@@ -537,11 +547,13 @@ class SRPDecoder(SRPDecoderBase):
         )
 
     def build_output_projection(self, args, dictionary, embed_tokens):
+        """Build the output projection layer."""
         super().build_output_projection(
             SRPConfig.from_namespace(args), dictionary, embed_tokens
         )
 
     def build_decoder_layer(self, args, no_encoder_attn=False):
+        """Build a single decoder layer."""
         return super().build_decoder_layer(
             SRPConfig.from_namespace(args), no_encoder_attn=no_encoder_attn
         )
