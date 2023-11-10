@@ -1,18 +1,18 @@
-################################################################################
-# Starlab Transformer Compression with SRP (Selectively Regularized Pruning)
-#
-# Author: Hyojin Jeon (tarahjjeon@snu.ac.kr), Seoul National University
-#         U Kang (ukang@snu.ac.kr), Seoul National University
-#
-# Version : 1.0
-# Date : Nov 29, 2022
-# Main Contact: Hyojin Jeon
-#
-# This software is free of charge under research purposes.
-# For commercial purposes, please contact the authors.
-# This code is mainly based on the [GitHub Repository]
-# [GitHub Repository]: https://github.com/facebookresearch/fairseq
-################################################################################
+"""
+Starlab Transformer Compression with SRP (Selectively Regularized Pruning)
+
+Author: Hyojin Jeon (tarahjjeon@snu.ac.kr), Seoul National University
+        U Kang (ukang@snu.ac.kr), Seoul National University
+
+Version : 1.0
+Date : Nov 29, 2022
+Main Contact: Hyojin Jeon
+
+This software is free of charge under research purposes.
+For commercial purposes, please contact the authors.
+This code is mainly based on the [GitHub Repository]
+[GitHub Repository]: https://github.com/facebookresearch/fairseq
+"""
 
 
 import re
@@ -35,6 +35,7 @@ _NAME_PARSER = r"(decoder|encoder|quant_noise)_(.*)"
 
 @dataclass
 class EncDecBaseConfig(FairseqDataclass):
+    """Config for Encoder and Decoder"""
     embed_path: Optional[str] = field(
         default=None, metadata={"help": "path to pre-trained embedding"}
     )
@@ -63,15 +64,18 @@ class EncDecBaseConfig(FairseqDataclass):
 
 @dataclass
 class DecoderConfig(EncDecBaseConfig):
+    "Configuration for Decoder"
     input_dim: int = II("model.decoder.embed_dim")
     output_dim: int = field(
         default=II("model.decoder.embed_dim"),
         metadata={
-            "help": "decoder output dimension (extra linear layer if different from decoder embed dim)"
+            "help": "decoder output dimension \
+                (extra linear layer if different from decoder embed dim)"
         },
     )
 
     def __post_init__(self):
+        """Validation after initializing configuration"""
         #  II doesn't work if we are just creating the object outside of hydra so fix that
         if self.input_dim == II("model.decoder.embed_dim"):
             self.input_dim = self.embed_dim
@@ -81,7 +85,8 @@ class DecoderConfig(EncDecBaseConfig):
 
 @dataclass
 class QuantNoiseConfig(FairseqDataclass):
-    pq: float = field(
+    """Configuration for quantization noise in quantized layers"""
+    _pq: float = field(
         default=0.0,
         metadata={"help": "iterative PQ quantization noise at training time"},
     )
@@ -99,6 +104,7 @@ class QuantNoiseConfig(FairseqDataclass):
 
 @dataclass
 class SRPConfig(FairseqDataclass):
+    """Configuration for SRP"""
     activation_fn: ChoiceEnum(utils.get_available_activation_fns()) = field(
         default="relu",
         metadata={"help": "activation function to use"},
@@ -116,13 +122,13 @@ class SRPConfig(FairseqDataclass):
     )
     adaptive_input: bool = False
     encoder: EncDecBaseConfig = EncDecBaseConfig()
-    # TODO should really be in the encoder config
+
     max_source_positions: int = field(
         default=DEFAULT_MAX_SOURCE_POSITIONS,
         metadata={"help": "Maximum input length supported by the encoder"},
     )
     decoder: DecoderConfig = DecoderConfig()
-    # TODO should really be in the decoder config
+
     max_target_positions: int = field(
         default=DEFAULT_MAX_TARGET_POSITIONS,
         metadata={"help": "Maximum output length supported by the decoder"},
@@ -133,7 +139,8 @@ class SRPConfig(FairseqDataclass):
     share_all_embeddings: bool = field(
         default=False,
         metadata={
-            "help": "share encoder, decoder and output embeddings (requires shared dictionary and embed dim)"
+            "help": "share encoder, decoder and output embeddings \
+                (requires shared dictionary and embed dim)"
         },
     )
     no_token_positional_embeddings: bool = field(
@@ -145,7 +152,8 @@ class SRPConfig(FairseqDataclass):
     adaptive_softmax_cutoff: Optional[List[int]] = field(
         default=None,
         metadata={
-            "help": "list of adaptive softmax cutoff points. Must be used with adaptive_loss criterion"
+            "help": "list of adaptive softmax cutoff points. \
+                Must be used with adaptive_loss criterion"
         },
     )
     adaptive_softmax_dropout: float = field(
@@ -176,13 +184,15 @@ class SRPConfig(FairseqDataclass):
     checkpoint_activations: bool = field(
         default=False,
         metadata={
-            "help": "checkpoint activations at each layer, which saves GPU memory usage at the cost of some additional compute"
+            "help": "checkpoint activations at each layer, \
+                which saves GPU memory usage at the cost of some additional compute"
         },
     )
     offload_activations: bool = field(
         default=False,
         metadata={
-            "help": "checkpoint activations at each layer, then save to gpu. Sets --checkpoint-activations."
+            "help": "checkpoint activations at each layer, then save to gpu. \
+            Sets --checkpoint-activations."
         },
     )
     # args for "Cross+Self-Attention for SRP Models" (Peitz et al., 2019)
@@ -192,7 +202,8 @@ class SRPConfig(FairseqDataclass):
     cross_self_attention: bool = field(
         default=False, metadata={"help": "perform cross+self-attention"}
     )
-    # args for Training with Quantization Noise for Extreme Model Compression ({Fan*, Stock*} et al., 2020)
+    # args for Training with Quantization Noise for Extreme Model Compression
+    # ({Fan*, Stock*} et al., 2020)
     quant_noise: QuantNoiseConfig = field(default=QuantNoiseConfig())
     min_params_to_wrap: int = field(
         default=DEFAULT_MIN_PARAMS_TO_WRAP,
@@ -239,7 +250,7 @@ class SRPConfig(FairseqDataclass):
             "help": "Target compression rate. Stop pruning if srp meets this"
         },
     )
-    
+
     use_kd: bool = field(
         default=False,
         metadata={
@@ -253,14 +264,14 @@ class SRPConfig(FairseqDataclass):
             "help": "the path of pretrained model"
         },
     )
-    
+
     srp: bool = field(
         default=False,
         metadata={
             "help": "Use srp for pruning or not"
         },
     )
-    
+
     weighted_layernorm: bool = field(
         default=False,
         metadata={
@@ -274,7 +285,7 @@ class SRPConfig(FairseqDataclass):
             "help": "number of iterations for pruning"
         },
     )
-    
+
     pruning_period: int = field(
         default=15,
         metadata={
@@ -305,7 +316,7 @@ class SRPConfig(FairseqDataclass):
         },
     )
 
-    
+
     attn_kd: float = field(
         default=0.0,
         metadata={"help": "coefficient for attention map kd"},
@@ -325,7 +336,7 @@ class SRPConfig(FairseqDataclass):
         metadata={"help": "coefficient for prob kd"},
     )
 
-    T: float= field(
+    _temp: float= field(
         default=10,
         metadata={"help": "temperature for kd"},
     )
@@ -372,6 +383,7 @@ class SRPConfig(FairseqDataclass):
 
     @classmethod
     def from_namespace(cls, args):
+        """builds a SRPConfig from a flat namespace (argparse.Namespace)"""
         if args is None:
             return None
         if not isinstance(args, cls):
@@ -380,14 +392,18 @@ class SRPConfig(FairseqDataclass):
             # currently, we can go generically from DC fields to args hierarchically
             # but we can't easily deconstruct a flat namespace to a hierarchical
             # DC. Mostly because we could have a sub-dc called `decoder-foo` that should not
-            # go to the sub struct called `decoder`. There are ways to go around this, but let's keep it simple
+            # go to the sub struct called `decoder`.
+            # There are ways to go around this, but let's keep it simple
             # for now.
             for fld in fields(cls):
-                # concretelly, the srp_config know what sub-dc it has, so we go through all the dc fields
+                # concretelly, the srp_config know what sub-dc it has,
+                # so we go through all the dc fields
                 # and if it's one that has a sub-dc, we build that sub-dc with `copy_keys()`
                 if fld.name == "decoder":
                     if safe_hasattr(args, "decoder"):
-                        #  in some cases, the args we receive is already structured (as DictConfigs), so let's just build the correct DC
+                        #  in some cases,
+                        # the args we receive is already structured (as DictConfigs),
+                        # so let's just build the correct DC
                         seen.add("decoder")
                         config.decoder = DecoderConfig(**args.decoder)
                     else:
@@ -418,7 +434,8 @@ class SRPConfig(FairseqDataclass):
                     setattr(config, fld.name, safe_getattr(args, fld.name))
             # we got all the fields defined in the dataclass, but
             # the argparse namespace might have extra args for two reasons:
-            #   - we are in a legacy class so all the args are not declared in the dataclass. Ideally once everyone has defined a dataclass for their model, we won't need this
+            #   - we are in a legacy class so all the args are not declared in the dataclass.
+            # Ideally once everyone has defined a dataclass for their model, we won't need this
             #   - some places expect args to be there but never define them
             args_dict = (
                 args._asdict()

@@ -1,24 +1,26 @@
-################################################################################
-# Starlab Transformer Compression with SRP (Selectively Regularized Pruning)
-#
-# Author: Hyojin Jeon (tarahjjeon@snu.ac.kr), Seoul National University
-#         U Kang (ukang@snu.ac.kr), Seoul National University
-#
-# Version : 1.0
-# Date : Nov 29, 2022
-# Main Contact: Hyojin Jeon
-#
-# This software is free of charge under research purposes.
-# For commercial purposes, please contact the authors.
-# This code is mainly based on the [GitHub Repository]
-# [GitHub Repository]: https://github.com/facebookresearch/fairseq
-################################################################################
+"""
+Starlab Transformer Compression with SRP (Selectively Regularized Pruning)
+
+Author: Hyojin Jeon (tarahjjeon@snu.ac.kr), Seoul National University
+        U Kang (ukang@snu.ac.kr), Seoul National University
+
+Version : 1.0
+Date : Nov 29, 2022
+Main Contact: Hyojin Jeon
+
+This software is free of charge under research purposes.
+For commercial purposes, please contact the authors.
+This code is mainly based on the [GitHub Repository]
+[GitHub Repository]: https://github.com/facebookresearch/fairseq
+"""
 
 import math
 from typing import Dict, List, Optional
 
 import torch
-import torch.nn as nn
+from torch import nn
+from torch import Tensor
+
 from fairseq import utils
 from fairseq.distributed import fsdp_wrap
 from fairseq.models import FairseqEncoder
@@ -28,15 +30,16 @@ from fairseq.modules import (
     PositionalEmbedding,
     SinusoidalPositionalEmbedding,
 )
-from ..modules import srp_layer, LayerNorm
+
 from fairseq.modules.checkpoint_activations import checkpoint_wrapper
 from fairseq.modules.quant_noise import quant_noise as apply_quant_noise_
-from torch import Tensor
+
+from ..modules import srp_layer, layer_norm
 from .srp_config import SRPConfig
 
 
-# rewrite name for backward compatibility in `make_generation_fast_`
 def module_name_fordropout(module_name: str) -> str:
+    """rewrite name for backward compatibility in `make_generation_fast_`"""
     if module_name == "SRPEncoderBase":
         return "SRPEncoder"
     else:
@@ -88,7 +91,7 @@ class SRPEncoderBase(FairseqEncoder):
         self.pos_emb_mask = nn.Parameter(torch.zeros(0), requires_grad=False)
 
         if cfg.layernorm_embedding:
-            self.layernorm_embedding = LayerNorm(embed_dim, export=cfg.export)
+            self.layernorm_embedding = layer_norm(embed_dim, export=cfg.export)
         else:
             self.layernorm_embedding = None
 
@@ -109,15 +112,10 @@ class SRPEncoderBase(FairseqEncoder):
             [self.build_encoder_layer(cfg) for i in range(cfg.encoder.layers)]
         )
         self.num_layers = len(self.layers)
-        """
-        # TODO: Delete 
-        if cfg.encoder.normalize_before:
-            self.layer_norm = LayerNorm(embed_dim, export=cfg.export)
-        else:
-            self.layer_norm = None
-        """
+
 
     def build_encoder_layer(self, cfg):
+        """Construct an encoder layer."""
         layer = srp_layer.SRPEncoderLayerBase(
             cfg, return_fc=self.return_fc
         )
@@ -134,18 +132,19 @@ class SRPEncoderBase(FairseqEncoder):
     def forward_embedding(
         self, src_tokens, token_embedding: Optional[torch.Tensor] = None
     ):
+        """forward embedding"""
         # embed tokens and positions
         if token_embedding is None:
             token_embedding = self.embed_tokens(src_tokens)
-        x = embed = self.embed_scale * token_embedding
+        _x = embed = self.embed_scale * token_embedding
         if self.embed_positions is not None:
-            x = embed + self.embed_positions(src_tokens)[:, :, self.pos_emb_mask]
+            _x = embed + self.embed_positions(src_tokens)[:, :, self.pos_emb_mask]
         if self.layernorm_embedding is not None:
-            x = self.layernorm_embedding(x)
-        x = self.dropout_module(x)
+            _x = self.layernorm_embedding(_x)
+        _x = self.dropout_module(_x)
         if self.quant_noise is not None:
-            x = self.quant_noise(x)
-        return x, embed
+            _x = self.quant_noise(_x)
+        return _x, embed
 
     def forward(
         self,
@@ -224,56 +223,51 @@ class SRPEncoderBase(FairseqEncoder):
         encoder_padding_mask = src_tokens.eq(self.padding_idx)
         has_pads = src_tokens.device.type == "xla" or encoder_padding_mask.any()
 
-        x, encoder_embedding = self.forward_embedding(src_tokens, token_embeddings)
+        _x, encoder_embedding = self.forward_embedding(src_tokens, token_embeddings)
 
         if compute_c:
-            x = x * self.embedding_c
+            _x = _x * self.embedding_c
 
         # account for padding while computing the representation
         if has_pads:
-            x = x * (1 - encoder_padding_mask.unsqueeze(-1).type_as(x))
+            _x = _x * (1 - encoder_padding_mask.unsqueeze(-1).type_as(_x))
 
         # B x T x C -> T x B x C
-        x = x.transpose(0, 1)
+        _x = _x.transpose(0, 1)
 
         encoder_states = []
         fc_results = []
 
         if return_all_hiddens:
-            encoder_states.append(x)
+            encoder_states.append(_x)
 
         # encoder layers
         hidden_states = {}
         for idx, layer in enumerate(self.layers):
             if not use_kd:
-                lr = layer(
-                    x, encoder_padding_mask=encoder_padding_mask if has_pads else None,
+                _lr = layer(
+                    _x, encoder_padding_mask=encoder_padding_mask if has_pads else None,
                     compute_c=compute_c, embedding_c=self.embedding_c, use_kd=False,
                     )
             else:
-                lr, hs = layer(
-                    x, encoder_padding_mask=encoder_padding_mask if has_pads else None,
+                _lr, _hs = layer(
+                    _x, encoder_padding_mask=encoder_padding_mask if has_pads else None,
                     compute_c=compute_c, embedding_c=self.embedding_c, use_kd=use_kd,
                     )
-                hidden_states[f'encoder.self_attn.{idx}'] = hs['self_attn']
-                hidden_states[f'encoder.fc.{idx}'] = hs['fc']
+                hidden_states[f'encoder.self_attn.{idx}'] = _hs['self_attn']
+                hidden_states[f'encoder.fc.{idx}'] = _hs['fc']
 
-            if isinstance(lr, tuple) and len(lr) == 2:
-                x, fc_result = lr
+            if isinstance(_lr, tuple) and len(_lr) == 2:
+                _x, fc_result = _lr
             else:
-                x = lr
+                _x = _lr
                 fc_result = None
 
             if return_all_hiddens and not torch.jit.is_scripting():
                 assert encoder_states is not None
-                encoder_states.append(x)
+                encoder_states.append(_x)
                 fc_results.append(fc_result)
 
-        """
-        # TODO: delete
-        if self.layer_norm is not None:
-            x = self.layer_norm(x)
-        """
 
         # The Pytorch Mobile lite interpreter does not supports returning NamedTuple in
         # `forward` so we use a dictionary instead.
@@ -287,7 +281,7 @@ class SRPEncoderBase(FairseqEncoder):
         )
 
         return {
-            "encoder_out": [x],  # T x B x C
+            "encoder_out": [_x],  # T x B x C
             "encoder_padding_mask": [encoder_padding_mask],  # B x T
             "encoder_embedding": [encoder_embedding],  # B x T x C
             "encoder_states": encoder_states,  # List[T x B x C]
@@ -311,9 +305,10 @@ class SRPEncoderBase(FairseqEncoder):
             )
         else:
             return self.forward_non_torchscript(net_input, compute_c=compute_c)
-    
+
     @torch.jit.unused
     def forward_non_torchscript(self, net_input: Dict[str, Tensor], compute_c=None):
+        """Non-TorchScript-compatible version of forward."""
         encoder_input = {
             k: v for k, v in net_input.items() if k != "prev_output_tokens"
         }
@@ -387,20 +382,20 @@ class SRPEncoderBase(FairseqEncoder):
     def upgrade_state_dict_named(self, state_dict, name):
         """Upgrade a (possibly old) state dict for new versions of fairseq."""
         if isinstance(self.embed_positions, SinusoidalPositionalEmbedding):
-            weights_key = "{}.embed_positions.weights".format(name)
+            weights_key = f"{name}.embed_positions.weights"
             if weights_key in state_dict:
-                print("deleting {0}".format(weights_key))
+                print(f"deleting {weights_key}")
                 del state_dict[weights_key]
             state_dict[
-                "{}.embed_positions._float_tensor".format(name)
+                f"{name}.embed_positions._float_tensor"
             ] = torch.FloatTensor(1)
         for i in range(self.num_layers):
             # update layer norms
             self.layers[i].upgrade_state_dict_named(
-                state_dict, "{}.layers.{}".format(name, i)
+                state_dict, "{name}.layers.{i}"
             )
 
-        version_key = "{}.version".format(name)
+        version_key = f"{name}.version"
         if utils.item(state_dict.get(version_key, torch.Tensor([1]))[0]) < 2:
             # earlier checkpoints did not normalize after the stack of layers
             self.layer_norm = None
@@ -410,6 +405,7 @@ class SRPEncoderBase(FairseqEncoder):
 
 
 class SRPEncoder(SRPEncoderBase):
+    """SRP encoder."""
     def __init__(self, args, dictionary, embed_tokens, return_fc=False):
         self.args = args
         super().__init__(
@@ -420,6 +416,7 @@ class SRPEncoder(SRPEncoderBase):
         )
 
     def build_encoder_layer(self, args):
+        """Build an encoder layer."""
         return super().build_encoder_layer(
             SRPConfig.from_namespace(args),
         )

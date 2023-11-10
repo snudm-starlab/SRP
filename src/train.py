@@ -1,22 +1,18 @@
 #!/usr/bin/env python3 -u
-################################################################################
-# Starlab Transformer Compression with SRP (Selectively Regularized Pruning)
-#
-# Author: Hyojin Jeon (tarahjjeon@snu.ac.kr), Seoul National University
-#         U Kang (ukang@snu.ac.kr), Seoul National University
-#
-# Version : 1.0
-# Date : Nov 29, 2022
-# Main Contact: Hyojin Jeon
-#
-# This software is free of charge under research purposes.
-# For commercial purposes, please contact the authors.
-# This code is mainly based on the [GitHub Repository]
-# [GitHub Repository]: https://github.com/facebookresearch/fairseq
-################################################################################
-
 """
-Train a new model on one or across multiple GPUs.
+Starlab Transformer Compression with SRP (Selectively Regularized Pruning)
+
+Author: Hyojin Jeon (tarahjjeon@snu.ac.kr), Seoul National University
+        U Kang (ukang@snu.ac.kr), Seoul National University
+
+Version : 1.0
+Date : Nov 29, 2022
+Main Contact: Hyojin Jeon
+
+This software is free of charge under research purposes.
+For commercial purposes, please contact the authors.
+This code is mainly based on the [GitHub Repository]
+[GitHub Repository]: https://github.com/facebookresearch/fairseq
 """
 
 import argparse
@@ -26,20 +22,10 @@ import os
 import sys
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-# We need to setup root logger before importing any fairseq libraries.
-logging.basicConfig(
-    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-    level=os.environ.get("LOGLEVEL", "INFO").upper(),
-    stream=sys.stdout,
-)
-logger = logging.getLogger("fairseq_cli.train")
-
 import numpy as np
 import torch
 from omegaconf import DictConfig, OmegaConf
 
-import checkpoint_utils
 from fairseq import options, quantization_utils, tasks, utils
 from fairseq.data import data_utils, iterators
 from fairseq.data.plasma_utils import PlasmaStore
@@ -51,10 +37,21 @@ from fairseq.distributed import utils as distributed_utils
 from fairseq.file_io import PathManager
 from fairseq.logging import meters, metrics, progress_bar
 from fairseq.model_parallel.megatron_trainer import MegatronTrainer
+
+import checkpoint_utils
 from trainer import Trainer
 
+# We need to setup root logger before importing any fairseq libraries.
+logging.basicConfig(
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    level=os.environ.get("LOGLEVEL", "INFO").upper(),
+    stream=sys.stdout,
+)
+logger = logging.getLogger("fairseq_cli.train")
 
 def main(cfg: FairseqConfig) -> None:
+    """Main function for training"""
     if isinstance(cfg, argparse.Namespace):
         cfg = convert_namespace_to_omegaconf(cfg)
 
@@ -65,7 +62,8 @@ def main(cfg: FairseqConfig) -> None:
         distributed_utils.is_master(cfg.distributed_training)
         and "job_logging_cfg" in cfg
     ):
-        # make hydra logging work with ddp (see # see https://github.com/facebookresearch/hydra/issues/1126)
+        # make hydra logging work with ddp
+        # see https://github.com/facebookresearch/hydra/issues/1126)
         logging.config.dictConfig(OmegaConf.to_container(cfg.job_logging_cfg))
 
     assert (
@@ -86,15 +84,15 @@ def main(cfg: FairseqConfig) -> None:
     # Print args
     logger.info(cfg)
 
-    if cfg.checkpoint.write_checkpoints_asynchronously:
-        try:
-            import iopath  # noqa: F401
-        except ImportError:
-            logging.exception(
-                "Asynchronous checkpoint writing is specified but iopath is "
-                "not installed: `pip install iopath`"
-            )
-            return
+    # if cfg.checkpoint.write_checkpoints_asynchronously:
+    #     try:
+    #         import iopath  # noqa: F401
+    #     except ImportError:
+    #         logging.exception(
+    #             "Asynchronous checkpoint writing is specified but iopath is "
+    #             "not installed: `pip install iopath`"
+    #         )
+    #         return
 
     # Setup task, e.g., translation, language modeling, etc.
     task = tasks.setup_task(cfg.task)
@@ -115,32 +113,20 @@ def main(cfg: FairseqConfig) -> None:
 
     criterion = task.build_criterion(cfg.criterion)
     logger.info(model)
-    logger.info("task: {}".format(task.__class__.__name__))
-    logger.info("model: {}".format(model.__class__.__name__))
-    logger.info("criterion: {}".format(criterion.__class__.__name__))
-    logger.info(
-        "num. shared model params: {:,} (num. trained: {:,})".format(
-            sum(
-                p.numel() for p in model.parameters() if not getattr(p, "expert", False)
-            ),
-            sum(
-                p.numel()
-                for p in model.parameters()
-                if not getattr(p, "expert", False) and p.requires_grad
-            ),
-        )
-    )
+    logger.info("task: %s", task.__class__.__name__)
+    logger.info("model: %s", model.__class__.__name__)
+    logger.info("criterion: %s", criterion.__class__.__name__)
 
+    _shared = sum(p.numel() for p in model.parameters() if not getattr(p, "expert", False))
+    _trained = sum(p.numel() for p in model.parameters() \
+        if not getattr(p, "expert", False) and p.requires_grad)
     logger.info(
-        "num. expert model params: {} (num. trained: {})".format(
-            sum(p.numel() for p in model.parameters() if getattr(p, "expert", False)),
-            sum(
-                p.numel()
-                for p in model.parameters()
-                if getattr(p, "expert", False) and p.requires_grad
-            ),
-        )
-    )
+        "num. shared model params: %d (num. trained: %d)", _shared, _trained)
+
+    _expert = sum(p.numel() for p in model.parameters() if getattr(p, "expert", False))
+    _trained = sum(p.numel() for p in model.parameters() \
+        if getattr(p, "expert", False) and p.requires_grad)
+    logger.info("num. expert model params: %d (num. trained: %d)", _expert, _trained)
 
     # Load valid dataset (we load training data below, based on the latest checkpoint)
     # We load the valid dataset AFTER building the model
@@ -166,17 +152,14 @@ def main(cfg: FairseqConfig) -> None:
         trainer = Trainer(cfg, task, model, criterion, quantizer)
     else:
         trainer = MegatronTrainer(cfg, task, model, criterion)
+
     logger.info(
-        "training on {} devices (GPUs/TPUs)".format(
-            cfg.distributed_training.distributed_world_size
+        "training on %s devices (GPUs/TPUs)",cfg.distributed_training.distributed_world_size
         )
-    )
     logger.info(
-        "max tokens per device = {} and max sentences per device = {}".format(
-            cfg.dataset.max_tokens,
-            cfg.dataset.batch_size,
+        "max tokens per device = %d and max sentences per device = %d",
+        cfg.dataset.max_tokens, cfg.dataset.batch_size
         )
-    )
 
     # Load the latest checkpoint if one is available and restore the
     # corresponding train iterator
@@ -190,18 +173,13 @@ def main(cfg: FairseqConfig) -> None:
     if extra_state is not None and 'pruning_manager' in extra_state:
         trainer.model.pm = extra_state['pruning_manager']
 
-    if cfg.common.tpu:
-        import torch_xla.core.xla_model as xm
-
-        xm.rendezvous("load_checkpoint")  # wait for all workers
-
     max_epoch = cfg.optimization.max_epoch or math.inf
-    lr = trainer.get_lr()
+    learning_rate = trainer.get_lr()
 
     train_meter = meters.StopwatchMeter()
     train_meter.start()
 
-    pruning_count = 0
+    # pruning_count = 0
 
     is_first_epoch = True
     while epoch_itr.next_epoch_idx <= max_epoch:
@@ -209,49 +187,49 @@ def main(cfg: FairseqConfig) -> None:
         if is_first_epoch:
             _epoch = epoch_itr.epoch
             is_first_epoch = False
-        else:   
+        else:
             _epoch = epoch_itr.epoch + 1
 
-        if lr <= cfg.optimization.stop_min_lr:
+        if learning_rate <= cfg.optimization.stop_min_lr:
             logger.info(
-                f"stopping training because current learning rate ({lr}) is smaller "
-                "than or equal to minimum learning rate "
-                f"(--stop-min-lr={cfg.optimization.stop_min_lr})"
+                "stopping training because current learning rate (%f) is smaller "
+                "than or equal to minimum learning rate (--stop-min-lr=%f)",
+                learning_rate, cfg.optimization.stop_min_lr
             )
             break
         # train for one epoch
         valid_losses, should_stop = train(cfg, trainer, task, epoch_itr)
-        
+
         # Check pruning target
         _params = np.sum([_p.numel() for _n, _p in trainer.model.named_parameters()
                           if _n[-2:] != '_c'])
         num_groups = trainer.model.get_num_groups()
         num_groups = [str(_num) for _num in num_groups]
-        
+
         # Writing training status (param/ bleu/ groups change)
-        
+
         _res = f'{epoch_itr.epoch},'
         _res+= ','.join(num_groups) + ','
         _res += f'{_params},{valid_losses[0]}'
         logger.info(_res)
         _path_list = cfg.checkpoint.save_dir.split('/')
         _res_file = f'../checkpoints/res_files/{_path_list[-1]}.csv'
-        logger.info(f"Result file: {_res_file}")
-        
+        logger.info("Result file: %s", _res_file)
+
         try:
             if not os.path.exists('../checkpoints/res_files'):
                 os.makedirs('../checkpoints/res_files')
-        except:
+        except OSError:
             print("Error: Failed to create the directories")
 
-        with open(_res_file, 'a') as f:
-            f.write(_res + '\n')
-        
+        with open(_res_file, 'a', encoding='utf-8') as file:
+            file.write(_res + '\n')
+
         if should_stop:
             break
 
         # only use first validation loss to update the learning rate
-        lr = trainer.lr_step(epoch_itr.epoch, valid_losses[0])
+        learning_rate = trainer.lr_step(epoch_itr.epoch, valid_losses[0])
 
         epoch_itr = trainer.get_train_iterator(
             epoch_itr.next_epoch_idx,
@@ -261,7 +239,7 @@ def main(cfg: FairseqConfig) -> None:
             disable_iterator_cache=task.has_sharded_data("train"),
         )
     train_meter.stop()
-    logger.info("done training in {:.1f} seconds".format(train_meter.sum))
+    logger.info("done training in %.1f seconds", train_meter.sum)
 
     # ioPath implementation to wait for all asynchronous file writes to complete.
     if cfg.checkpoint.write_checkpoints_asynchronously:
@@ -275,14 +253,16 @@ def main(cfg: FairseqConfig) -> None:
 
 
 def should_stop_early(cfg: DictConfig, valid_loss: float) -> bool:
+    """Check whether to early stop training."""
     # skip check if no validation was done in the current epoch
     if valid_loss is None:
         return False
     if cfg.checkpoint.patience <= 0:
         return False
 
-    def is_better(a, b):
-        return a > b if cfg.checkpoint.maximize_best_checkpoint_metric else a < b
+    def is_better(metric1, metric2):
+        return metric1 > metric2 if cfg.checkpoint.maximize_best_checkpoint_metric\
+            else metric1 < metric2
 
     prev_best = getattr(should_stop_early, "best", None)
     if prev_best is None or is_better(valid_loss, prev_best):
@@ -293,10 +273,9 @@ def should_stop_early(cfg: DictConfig, valid_loss: float) -> bool:
         should_stop_early.num_runs += 1
         if should_stop_early.num_runs >= cfg.checkpoint.patience:
             logger.info(
-                "early stop since valid performance hasn't improved for last {} runs".format(
+                "early stop since valid performance hasn't improved for last %s runs",
                     cfg.checkpoint.patience
-                )
-            )
+                    )
             return True
         else:
             return False
@@ -372,7 +351,7 @@ def train(
 
     for i, samples in enumerate(progress):
         with metrics.aggregate("train_inner"), torch.autograd.profiler.record_function(
-            "train_step-%d" % i
+            f"train_step-{i}"
         ):
             log_output = trainer.train_step(samples, scoring=False)
 
@@ -396,7 +375,7 @@ def train(
             break
 
     # log end-of-epoch stats
-    logger.info("end of epoch {} (average epoch stats below)".format(epoch_itr.epoch))
+    logger.info("end of epoch %d (average epoch stats below)", epoch_itr.epoch)
     stats = get_training_stats(metrics.get_smoothed_values("train"))
     progress.print(stats, tag="train", step=num_updates)
 
@@ -409,10 +388,10 @@ def _flatten_config(cfg: DictConfig):
     config = OmegaConf.to_container(cfg)
     # remove any legacy Namespaces and replace with a single "args"
     namespace = None
-    for k, v in list(config.items()):
-        if isinstance(v, argparse.Namespace):
-            namespace = v
-            del config[k]
+    for key, value in list(config.items()):
+        if isinstance(value, argparse.Namespace):
+            namespace = value
+            del config[key]
     if namespace is not None:
         config["args"] = vars(namespace)
     return config
@@ -426,6 +405,8 @@ def validate_and_save(
     valid_subsets: List[str],
     end_of_epoch: bool,
 ) -> Tuple[List[Optional[float]], bool]:
+    """Evaluate the model on the validation set(s) and return the losses, and save the checkpoint"""
+
     num_updates = trainer.get_num_updates()
     max_update = cfg.optimization.max_update or math.inf
 
@@ -435,8 +416,8 @@ def validate_and_save(
     if num_updates >= max_update:
         should_stop = True
         logger.info(
-            f"Stopping training due to "
-            f"num_updates: {num_updates} >= max_update: {max_update}"
+            "Stopping training due to num_updates: %d >= max_update: %d",
+            num_updates, max_update
         )
 
     training_time_hours = trainer.cumulative_training_time() / (60 * 60)
@@ -446,9 +427,9 @@ def validate_and_save(
     ):
         should_stop = True
         logger.info(
-            f"Stopping training due to "
-            f"cumulative_training_time: {training_time_hours} > "
-            f"stop_time_hours: {cfg.optimization.stop_time_hours} hour(s)"
+            "Stopping training due to cumulative_training_time: %f > "
+            "stop_time_hours: %f hour(s)",
+            training_time_hours, cfg.optimization.stop_time_hours
         )
 
     do_save = (
@@ -493,6 +474,7 @@ def validate_and_save(
 
 
 def get_training_stats(stats: Dict[str, Any]) -> Dict[str, Any]:
+    """Log intermediate stats to TensorBoard and return stats for the logger."""
     stats["wall"] = round(metrics.get_meter("default", "wall").elapsed_time, 0)
     return stats
 
@@ -513,7 +495,7 @@ def validate(
     trainer.begin_valid_epoch(epoch_itr.epoch)
     valid_losses = []
     for subset_idx, subset in enumerate(subsets):
-        logger.info('begin validation on "{}" subset'.format(subset))
+        logger.info('begin validation on %s subset', subset)
 
         # Initialize data iterator
         itr = trainer.get_valid_iterator(subset).next_epoch_itr(
@@ -585,9 +567,10 @@ def get_valid_stats(
     stats: Dict[str, Any],
     tracking_best: bool,
 ) -> Dict[str, Any]:
+    """Log validation stats to TensorBoard and return a dict of them"""
     stats["num_updates"] = trainer.get_num_updates()
     if tracking_best and hasattr(checkpoint_utils.save_checkpoint, "best"):
-        key = "best_{0}".format(cfg.checkpoint.best_checkpoint_metric)
+        key = f"best_{cfg.checkpoint.best_checkpoint_metric}"
         best_function = max if cfg.checkpoint.maximize_best_checkpoint_metric else min
         stats[key] = best_function(
             checkpoint_utils.save_checkpoint.best,
@@ -599,6 +582,7 @@ def get_valid_stats(
 def cli_main(
     modify_parser: Optional[Callable[[argparse.ArgumentParser], None]] = None
 ) -> None:
+    """Run the main training program."""
     parser = options.get_training_parser()
     args = options.parse_args_and_arch(parser, modify_parser=modify_parser)
 
@@ -607,7 +591,8 @@ def cli_main(
     if cfg.common.use_plasma_view:
         server = PlasmaStore(path=cfg.common.plasma_path)
         logger.info(
-            f"Started plasma server pid {server.server.pid} {cfg.common.plasma_path}"
+            "Started plasma server pid %s %s",
+            server.server.pid, cfg.common.plasma_path
         )
 
     if args.profile:

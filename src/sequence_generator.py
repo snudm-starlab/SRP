@@ -22,7 +22,7 @@ import sys
 from typing import Dict, List, Optional
 
 import torch
-import torch.nn as nn
+from torch import nn
 from torch import Tensor
 
 from fairseq import search, utils
@@ -32,6 +32,31 @@ from fairseq.ngram_repeat_block import NGramRepeatBlock
 
 
 class SequenceGenerator(nn.Module):
+    """
+    Generates translations of a given source sentence.
+
+    Args:
+        models (List[~fairseq.models.FairseqModel]): ensemble of models,
+            currently support fairseq.models.TransformerModel for scripting
+        beam_size (int, optional): beam width (default: 1)
+        max_len_a/b (int, optional): generate sequences of maximum length
+            ax + b, where x is the source length
+        max_len (int, optional): the maximum length of the generated output
+            (not including end-of-sentence)
+        min_len (int, optional): the minimum length of the generated output
+            (not including end-of-sentence)
+        normalize_scores (bool, optional): normalize scores by the length
+            of the output (default: True)
+        len_penalty (float, optional): length penalty, where <1.0 favors
+            shorter, >1.0 favors longer sentences (default: 1.0)
+        unk_penalty (float, optional): unknown word penalty, where <0
+            produces more unks, >0 produces fewer (default: 0.0)
+        temperature (float, optional): temperature, where values
+            >1.0 produce more uniform samples and values <1.0 produce
+            sharper samples (default: 1.0)
+        match_source_len (bool, optional): outputs should match the source
+            length (default: False)
+        """
     def __init__(
         self,
         models,
@@ -53,30 +78,6 @@ class SequenceGenerator(nn.Module):
         lm_model=None,
         lm_weight=1.0,
     ):
-        """Generates translations of a given source sentence.
-
-        Args:
-            models (List[~fairseq.models.FairseqModel]): ensemble of models,
-                currently support fairseq.models.TransformerModel for scripting
-            beam_size (int, optional): beam width (default: 1)
-            max_len_a/b (int, optional): generate sequences of maximum length
-                ax + b, where x is the source length
-            max_len (int, optional): the maximum length of the generated output
-                (not including end-of-sentence)
-            min_len (int, optional): the minimum length of the generated output
-                (not including end-of-sentence)
-            normalize_scores (bool, optional): normalize scores by the length
-                of the output (default: True)
-            len_penalty (float, optional): length penalty, where <1.0 favors
-                shorter, >1.0 favors longer sentences (default: 1.0)
-            unk_penalty (float, optional): unknown word penalty, where <0
-                produces more unks, >0 produces fewer (default: 0.0)
-            temperature (float, optional): temperature, where values
-                >1.0 produce more uniform samples and values <1.0 produce
-                sharper samples (default: 1.0)
-            match_source_len (bool, optional): outputs should match the source
-                length (default: False)
-        """
         super().__init__()
         if isinstance(models, EnsembleModel):
             self.model = models
@@ -132,6 +133,7 @@ class SequenceGenerator(nn.Module):
             self.lm_model.eval()
 
     def cuda(self):
+        """Move models to CUDA."""
         self.model.cuda()
         return self
 
@@ -153,7 +155,6 @@ class SequenceGenerator(nn.Module):
         """
         return self._generate(sample, prefix_tokens, bos_token=bos_token)
 
-    # TODO(myleott): unused, deprecate after pytorch-translate migration
     def generate_batched_itr(self, data_itr, beam_size=None, cuda=False, timer=None):
         """Iterate over a batched dataset and yield individual translations.
         Args:
@@ -161,14 +162,14 @@ class SequenceGenerator(nn.Module):
             timer (StopwatchMeter, optional): time generations
         """
         for sample in data_itr:
-            s = utils.move_to_cuda(sample) if cuda else sample
-            if "net_input" not in s:
+            sub_sample = utils.move_to_cuda(sample) if cuda else sample
+            if "net_input" not in sub_sample:
                 continue
-            input = s["net_input"]
+            _input = sub_sample["net_input"]
             # model.forward normally channels prev_output_tokens into the decoder
             # separately, but SequenceGenerator directly calls model.encoder
             encoder_input = {
-                k: v for k, v in input.items() if k != "prev_output_tokens"
+                key: value for key, value in _input.items() if key != "prev_output_tokens"
             }
             if timer is not None:
                 timer.start()
@@ -176,15 +177,15 @@ class SequenceGenerator(nn.Module):
                 hypos = self.generate(encoder_input)
             if timer is not None:
                 timer.stop(sum(len(h[0]["tokens"]) for h in hypos))
-            for i, id in enumerate(s["id"].data):
+            for idx, _id in enumerate(sub_sample["id"].data):
                 # remove padding
-                src = utils.strip_pad(input["src_tokens"].data[i, :], self.pad)
+                src = utils.strip_pad(_input["src_tokens"].data[idx, :], self.pad)
                 ref = (
-                    utils.strip_pad(s["target"].data[i, :], self.pad)
-                    if s["target"] is not None
+                    utils.strip_pad(sub_sample["target"].data[idx, :], self.pad)
+                    if sub_sample["target"] is not None
                     else None
                 )
-                yield id, src, ref, hypos[i]
+                yield _id, src, ref, hypos[idx]
 
     @torch.no_grad()
     def generate(
@@ -211,6 +212,7 @@ class SequenceGenerator(nn.Module):
         constraints: Optional[Tensor] = None,
         bos_token: Optional[int] = None,
     ):
+        """Generate sequences from a given starting position."""
         incremental_states = torch.jit.annotate(
             List[Dict[str, Dict[str, Optional[Tensor]]]],
             [
@@ -241,7 +243,7 @@ class SequenceGenerator(nn.Module):
                 else torch.tensor(src_tokens.size(-1)).to(src_tokens)
             )
         else:
-            raise Exception(
+            raise ValueError(
                 "expected src_tokens or source in net input. input keys: "
                 + str(net_input.keys())
             )
@@ -306,7 +308,9 @@ class SequenceGenerator(nn.Module):
         finalized = torch.jit.annotate(
             List[List[Dict[str, Tensor]]],
             [torch.jit.annotate(List[Dict[str, Tensor]], []) for i in range(bsz)],
-        )  # contains lists of dictionaries of infomation about the hypothesis being finalized at each step
+        )
+        # contains lists of dictionaries of infomation about
+        # the hypothesis being finalized at each step
 
         # a boolean array indicating if the sentence at the index is finished or not
         finished = [False for i in range(bsz)]
@@ -476,7 +480,6 @@ class SequenceGenerator(nn.Module):
                     bsz, dtype=torch.bool, device=cand_indices.device
                 )
                 batch_mask[finalized_sents] = False
-                # TODO replace `nonzero(as_tuple=False)` after TorchScript supports it
                 batch_idxs = torch.arange(
                     bsz, device=cand_indices.device
                 ).masked_select(batch_mask)
@@ -534,8 +537,8 @@ class SequenceGenerator(nn.Module):
 
             # update cands_to_ignore to ignore any finalized hypos
 
-            # {active_bbsz_idx} denotes which beam number is continued for each new hypothesis (a beam
-            # can be selected more than once).
+            # {active_bbsz_idx} denotes which beam number is continued for each new hypothesis
+            # a beam can be selected more than once.
             active_bbsz_idx = torch.gather(cand_bbsz_idx, dim=1, index=active_hypos)
             active_scores = torch.gather(cand_scores, dim=1, index=active_hypos)
 
@@ -573,15 +576,11 @@ class SequenceGenerator(nn.Module):
             reorder_state = active_bbsz_idx
 
         # sort by score descending
-        for sent in range(len(finalized)):
-            scores = torch.tensor(
-                [float(elem["score"].item()) for elem in finalized[sent]]
-            )
+        for sent, elements in enumerate(finalized):
+            scores = torch.tensor([float(elem["score"].item()) for elem in elements])
             _, sorted_scores_indices = torch.sort(scores, descending=True)
-            finalized[sent] = [finalized[sent][ssi] for ssi in sorted_scores_indices]
-            finalized[sent] = torch.jit.annotate(
-                List[Dict[str, Tensor]], finalized[sent]
-            )
+            finalized[sent] = [elements[ssi] for ssi in sorted_scores_indices]
+            finalized[sent] = torch.jit.annotate(List[Dict[str, Tensor]], finalized[sent])
         return finalized
 
     def _prefix_tokens(
@@ -601,8 +600,7 @@ class SequenceGenerator(nn.Module):
         if eos_mask.any():
             # validate that the first beam matches the prefix
             first_beam = tokens[eos_mask].view(-1, beam_size, tokens.size(-1))[
-                :, 0, 1 : step + 1
-            ]
+                :, 0, 1 : step + 1]
             eos_mask_batch_dim = eos_mask.view(-1, beam_size)[:, 0]
             target_prefix = prefix_tokens[eos_mask_batch_dim][:, :step]
             assert (first_beam == target_prefix).all()
@@ -614,6 +612,7 @@ class SequenceGenerator(nn.Module):
         return lprobs, tokens, scores
 
     def replicate_first_beam(self, tensor, mask, beam_size: int):
+        """Replicate beam_size times along batch dimension"""
         tensor = tensor.view(-1, beam_size, tensor.size(-1))
         tensor[mask] = tensor[mask][:, :1, :]
         return tensor.view(-1, tensor.size(-1))
@@ -632,7 +631,8 @@ class SequenceGenerator(nn.Module):
         src_lengths,
         max_len: int,
     ):
-        """Finalize hypothesis, store finalized information in `finalized`, and change `finished` accordingly.
+        """Finalize hypothesis, store finalized information in `finalized`,
+        and change `finished` accordingly.
         A sentence is finalized when {beam_size} finished items have been collected for it.
 
         Returns number of sentences (not beam items) being finalized.
@@ -672,8 +672,8 @@ class SequenceGenerator(nn.Module):
         # sentences.
         cum_unfin: List[int] = []
         prev = 0
-        for f in finished:
-            if f:
+        for fin in finished:
+            if fin:
                 prev += 1
             else:
                 cum_unfin.append(prev)
@@ -766,23 +766,23 @@ class EnsembleModel(nn.Module):
             self.has_incremental = True
 
     def forward(self):
-        pass
+        """Forward"""
 
     def has_encoder(self):
+        """Whether any of the models has an encoder."""
         return hasattr(self.single_model, "encoder")
 
     def has_incremental_states(self):
+        """Whether any of the models has incremental states."""
         return self.has_incremental
 
     def max_decoder_positions(self):
+        """Maximum length supported by the decoder."""
         return min(
-            [
-                m.max_decoder_positions()
-                for m in self.models
-                if hasattr(m, "max_decoder_positions")
-            ]
-            + [sys.maxsize]
-        )
+            [m.max_decoder_positions()
+             for m in self.models
+             if hasattr(m, "max_decoder_positions")]
+            + [sys.maxsize])
 
     def set_decoder_beam_size(self, beam_size):
         """Set beam size for efficient beamable enc-dec attention."""
@@ -793,13 +793,14 @@ class EnsembleModel(nn.Module):
 
     @torch.jit.export
     def forward_encoder(self, net_input: Dict[str, Tensor]):
+        """Forward pass for the encoder."""
         if not self.has_encoder():
             return None
 
         def _forward_encoder(model, net_input):
             is_srp = hasattr(model, 'pm')
             if is_srp: #SRP
-                compute_c = (model.phase=='pruning')
+                compute_c = model.phase=='pruning'
                 return model.encoder.forward_torchscript(net_input, compute_c=compute_c)
             else:
                 return model.encoder.forward_torchscript(net_input)
@@ -814,6 +815,7 @@ class EnsembleModel(nn.Module):
         incremental_states: List[Dict[str, Dict[str, Optional[Tensor]]]],
         temperature: float = 1.0,
     ):
+        """Forward pass for the decoder."""
         log_probs = []
         avg_attn: Optional[Tensor] = None
         encoder_out: Optional[Dict[str, List[Tensor]]] = None
@@ -821,7 +823,7 @@ class EnsembleModel(nn.Module):
             is_srp = hasattr(model, 'pm')
             if is_srp:
                 # Model is SRP
-                compute_c = (model.phase=='pruning')
+                compute_c = model.phase=='pruning'
             else:
                 compute_c = False
 
@@ -846,7 +848,7 @@ class EnsembleModel(nn.Module):
             else:
                 if hasattr(model, "decoder"):
                     if is_srp:
-                        decoder_out = model.decoder.forward(tokens, 
+                        decoder_out = model.decoder.forward(tokens,
                                                         compute_c=compute_c,
                                                         encoder_out=encoder_out)
                     else:
@@ -924,6 +926,7 @@ class EnsembleModel(nn.Module):
         incremental_states: List[Dict[str, Dict[str, Optional[Tensor]]]],
         new_order,
     ):
+        """Reorder incremental state for the decoder."""
         if not self.has_incremental_states():
             return
         for i, model in enumerate(self.models):
@@ -933,10 +936,7 @@ class EnsembleModel(nn.Module):
 
 
 class SequenceGeneratorWithAlignment(SequenceGenerator):
-    def __init__(
-        self, models, tgt_dict, left_pad_target=False, print_alignment="hard", **kwargs
-    ):
-        """Generates translations of a given source sentence.
+    """Generates translations of a given source sentence.
 
         Produces alignments following "Jointly Learning to Align and
         Translate with Transformer Models" (Garg et al., EMNLP 2019).
@@ -945,7 +945,10 @@ class SequenceGeneratorWithAlignment(SequenceGenerator):
             left_pad_target (bool, optional): Whether or not the
                 hypothesis should be left padded or not when they are
                 teacher forced for generating alignments.
-        """
+    """
+    def __init__(
+        self, models, tgt_dict, left_pad_target=False, print_alignment="hard", **kwargs
+    ):
         super().__init__(EnsembleModelWithAlignment(models), tgt_dict, **kwargs)
         self.left_pad_target = left_pad_target
 
@@ -1028,6 +1031,7 @@ class EnsembleModelWithAlignment(EnsembleModel):
         super().__init__(models)
 
     def forward_align(self, src_tokens, src_lengths, prev_output_tokens):
+        """Compute model ensembling and alignments for encoder-decoder models."""
         avg_attn = None
         for model in self.models:
             decoder_out = model(src_tokens, src_lengths, prev_output_tokens)
