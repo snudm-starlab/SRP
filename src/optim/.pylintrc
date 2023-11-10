@@ -1,0 +1,5 @@
+[MASTER]
+init-hook="import sys; sys.path.append('/home/jener05458/SWStarlab/SRP')"
+
+[REPORTS]
+disable = E1101, R0902, R0912, R0913, R0914, R0915, R1724, W0123

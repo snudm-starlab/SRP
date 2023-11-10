@@ -1,18 +1,18 @@
-################################################################################
-# Starlab Transformer Compression with SRP (Selectively Regularized Pruning)
-#
-# Author: Hyojin Jeon (tarahjjeon@snu.ac.kr), Seoul National University
-#         U Kang (ukang@snu.ac.kr), Seoul National University
-#
-# Version : 1.0
-# Date : Nov 29, 2022
-# Main Contact: Hyojin Jeon
-#
-# This software is free of charge under research purposes.
-# For commercial purposes, please contact the authors.
-# This code is mainly based on the [GitHub Repository]
-# [GitHub Repository]: https://github.com/facebookresearch/fairseq
-################################################################################
+"""
+Starlab Transformer Compression with SRP (Selectively Regularized Pruning)
+
+Author: Hyojin Jeon (tarahjjeon@snu.ac.kr), Seoul National University
+        U Kang (ukang@snu.ac.kr), Seoul National University
+
+Version : 1.0
+Date : Nov 29, 2022
+Main Contact: Hyojin Jeon
+
+This software is free of charge under research purposes.
+For commercial purposes, please contact the authors.
+This code is mainly based on the [GitHub Repository]
+[GitHub Repository]: https://github.com/facebookresearch/fairseq
+"""
 
 from fairseq.dataclass.utils import gen_parser_from_dataclass
 from fairseq.models import (
@@ -36,7 +36,7 @@ class SRPModel(SRPModelBase):
     This is the legacy implementation of the srp model that
     uses argparse for configuration.
     """
-    
+
     def __init__(self, args, encoder, decoder):
         cfg = SRPConfig.from_namespace(args)
         super().__init__(cfg, encoder, decoder)
@@ -75,7 +75,8 @@ class SRPModel(SRPModelBase):
                 raise ValueError("--share-all-embeddings requires a joined dictionary")
             if args.encoder_embed_dim != args.decoder_embed_dim:
                 raise ValueError(
-                    "--share-all-embeddings requires --encoder-embed-dim to match --decoder-embed-dim"
+                    "--share-all-embeddings requires --encoder-embed-dim to match \
+                        --decoder-embed-dim"
                 )
             if args.decoder_embed_path and (
                 args.decoder_embed_path != args.encoder_embed_path
@@ -97,18 +98,21 @@ class SRPModel(SRPModelBase):
 
     @classmethod
     def build_embedding(cls, args, dictionary, embed_dim, path=None):
+        """Build a new embedding layer."""
         return super().build_embedding(
             SRPConfig.from_namespace(args), dictionary, embed_dim, path
         )
 
     @classmethod
     def build_encoder(cls, args, src_dict, embed_tokens):
+        """Build a new encoder instance."""
         return super().build_encoder(
             SRPConfig.from_namespace(args), src_dict, embed_tokens
         )
 
     @classmethod
     def build_decoder(cls, args, tgt_dict, embed_tokens):
+        """Build a new decoder instance."""
         return super().build_decoder(
             SRPConfig.from_namespace(args), tgt_dict, embed_tokens
         )
@@ -118,6 +122,7 @@ class SRPModel(SRPModelBase):
 
 @register_model_architecture("srp", "srp")
 def base_architecture(args):
+    """Set default arguments for every architecture."""
     args.encoder_embed_path = getattr(args, "encoder_embed_path", None)
     args.encoder_embed_dim = getattr(args, "encoder_embed_dim", 512)
     args.encoder_ffn_embed_dim = getattr(args, "encoder_ffn_embed_dim", 2048)
@@ -174,6 +179,7 @@ def base_architecture(args):
 
 @register_model_architecture("srp", "srp_iwslt_de_en")
 def srp_iwslt_de_en(args):
+    """This is an example configuration of transformer model for IWSLT'14 De-En translation task"""
     args.encoder_embed_dim = getattr(args, "encoder_embed_dim", 512)
     args.encoder_ffn_embed_dim = getattr(args, "encoder_ffn_embed_dim", 1024)
     args.encoder_attention_heads = getattr(args, "encoder_attention_heads", 4)
@@ -187,6 +193,7 @@ def srp_iwslt_de_en(args):
 
 @register_model_architecture("srp", "srp_iwslt_de_en_small")
 def srp_iwslt_de_en_small(args):
+    """This is an example configuration of transformer model for IWSLT'14 De-En translation task"""
     args.encoder_embed_dim = getattr(args, "encoder_embed_dim", 512)
     args.encoder_ffn_embed_dim = getattr(args, "encoder_ffn_embed_dim", 1024)
     args.encoder_attention_heads = getattr(args, "encoder_attention_heads", 4)
@@ -199,12 +206,14 @@ def srp_iwslt_de_en_small(args):
 
 @register_model_architecture("srp", "srp_wmt_en_de")
 def srp_wmt_en_de(args):
+    """This is an example configuration of transformer model for WMT'14 En-De translation task"""
     base_architecture(args)
 
 
 # parameters used in the "Attention Is All You Need" paper (Vaswani et al., 2017)
 @register_model_architecture("srp", "srp_vaswani_wmt_en_de_big")
 def srp_vaswani_wmt_en_de_big(args):
+    """This is an example configuration of transformer model for WMT'14 En-De translation task"""
     args.encoder_embed_dim = getattr(args, "encoder_embed_dim", 1024)
     args.encoder_ffn_embed_dim = getattr(args, "encoder_ffn_embed_dim", 4096)
     args.encoder_attention_heads = getattr(args, "encoder_attention_heads", 16)
@@ -214,5 +223,3 @@ def srp_vaswani_wmt_en_de_big(args):
     args.decoder_attention_heads = getattr(args, "decoder_attention_heads", 16)
     args.dropout = getattr(args, "dropout", 0.3)
     base_architecture(args)
-
-

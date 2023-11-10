@@ -1,19 +1,18 @@
-################################################################################
-# Starlab Transformer Compression with SRP (Selectively Regularized Pruning)
-#
-# Author: Hyojin Jeon (tarahjjeon@snu.ac.kr), Seoul National University
-#         U Kang (ukang@snu.ac.kr), Seoul National University
-#
-# Version : 1.0
-# Date : Nov 29, 2022
-# Main Contact: Hyojin Jeon
-#
-# This software is free of charge under research purposes.
-# For commercial purposes, please contact the authors.
-# This code is mainly based on the [GitHub Repository]
-# [GitHub Repository]: https://github.com/facebookresearch/fairseq
-################################################################################
+"""
+Starlab Transformer Compression with SRP (Selectively Regularized Pruning)
 
+Author: Hyojin Jeon (tarahjjeon@snu.ac.kr), Seoul National University
+        U Kang (ukang@snu.ac.kr), Seoul National University
+
+Version : 1.0
+Date : Nov 29, 2022
+Main Contact: Hyojin Jeon
+
+This software is free of charge under research purposes.
+For commercial purposes, please contact the authors.
+This code is mainly based on the [GitHub Repository]
+[GitHub Repository]: https://github.com/facebookresearch/fairseq
+"""
 import logging
 import math
 from collections.abc import Collection
@@ -34,6 +33,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class SRPAdamConfig(FairseqDataclass):
+    """Configuration for SRP Adam optimizer."""
     adam_betas: Any = field(
         default=(0.9, 0.999), metadata={"help": "betas for Adam optimizer"}
     )
@@ -47,9 +47,9 @@ class SRPAdamConfig(FairseqDataclass):
     fp16_adam_stats: bool = field(
         default=False, metadata={"help": "use FP16 stats (with automatic scaling)"}
     )
-    # TODO common vars below in parent
+
     tpu: bool = II("common.tpu")
-    lr: List[float] = II("optimization.lr")
+    learning_rate: List[float] = II("optimization.lr")
 
 
 @register_optimizer("srp_adam", dataclass=SRPAdamConfig)
@@ -96,9 +96,9 @@ class SRPAdam(FairseqOptimizer):
         different learning rate.
         """
         return {
-            "lr": self.cfg.lr[0]
-            if isinstance(self.cfg.lr, Collection)
-            else self.cfg.lr,
+            "lr": self.cfg.learning_rate[0]
+            if isinstance(self.cfg.learning_rate, Collection)
+            else self.cfg.learning_rate,
             "betas": eval(self.cfg.adam_betas)
             if isinstance(self.cfg.adam_betas, str)
             else OmegaConf.to_container(self.cfg.adam_betas),
@@ -154,17 +154,23 @@ class Adam(torch.optim.Optimizer):
         weight_decay=0,
         amsgrad=False,
     ):
-        defaults = dict(
-            lr=lr, betas=betas, eps=eps, weight_decay=weight_decay, amsgrad=amsgrad
-        )
-        super(Adam, self).__init__(params, defaults)
+        defaults = {
+            "lr": lr,
+            "betas": betas,
+            "eps": eps,
+            "weight_decay": weight_decay,
+            "amsgrad": amsgrad
+        }
+        super().__init__(params, defaults)
 
     @property
     def supports_memory_efficient_fp16(self):
+        """Allow fp16 optimizer to use memory-efficient ops"""
         return True
 
     @property
     def supports_flat_params(self):
+        """Allow flattening of params"""
         return True
 
     def step(self, closure=None):
@@ -179,10 +185,10 @@ class Adam(torch.optim.Optimizer):
             loss = closure()
 
         for group in self.param_groups:
-            for p in group["params"]:
-                if p.grad is None:
+            for param in group["params"]:
+                if param.grad is None:
                     continue
-                grad = p.grad.data
+                grad = param.grad.data
                 if grad.dtype in {torch.float16, torch.bfloat16}:
                     grad = grad.float()
                 if grad.is_sparse:
@@ -191,11 +197,11 @@ class Adam(torch.optim.Optimizer):
                     )
                 amsgrad = group.get("amsgrad", False)
 
-                p_data_fp32 = p.data
-                if p.data.dtype in {torch.float16, torch.bfloat16}:
+                p_data_fp32 = param.data
+                if param.data.dtype in {torch.float16, torch.bfloat16}:
                     p_data_fp32 = p_data_fp32.float()
 
-                state = self.state[p]
+                state = self.state[param]
 
                 # State initialization
                 if len(state) == 0:
@@ -244,21 +250,21 @@ class Adam(torch.optim.Optimizer):
 
                 p_data_fp32.addcdiv_(exp_avg, denom, value=-step_size)
 
-                if p.data.dtype in {torch.float16, torch.bfloat16}:
-                    p.data.copy_(p_data_fp32)
+                if param.data.dtype in {torch.float16, torch.bfloat16}:
+                    param.data.copy_(p_data_fp32)
 
         return loss
 
     @torch.no_grad()
     def remove_grads(self, _model):
-        # remove gradient and exp avg, exp_avg_sq
-        pm = _model.pm
-        pd = pm.pruning_dict
+        """remove gradient and exp avg, exp_avg_sq"""
+        pruning_manager = _model.pm
+        pruning_dict = pruning_manager.pruning_dict
 
-        en_heads = _model.cfg.encoder.attention_heads
-        de_heads = _model.cfg.decoder.attention_heads
+        _ = _model.cfg.encoder.attention_heads  # en_heads
+        _ = _model.cfg.decoder.attention_heads  # de_heads
 
-        named_params = list(_model.named_parameters())
+        _ = list(_model.named_parameters())  # named_params
         param_list = []
         param_names = []
         for _n, _p in _model.named_parameters():
@@ -268,11 +274,11 @@ class Adam(torch.optim.Optimizer):
                 continue
             param_list.append(_p)
             param_names.append(_n)
-            
-        def get_pruning_mask(max_len, pruning_indices):
-            _mask = torch.ones(max_len).bool()
-            _mask[pruning_indices] = False
-            return _mask
+
+        # def get_pruning_mask(max_len, pruning_indices):
+        #     _mask = torch.ones(max_len).bool()
+        #     _mask[pruning_indices] = False
+        #     return _mask
 
         _i = -1
         for _k, _v in self.state.items():
@@ -289,7 +295,7 @@ class Adam(torch.optim.Optimizer):
             elif 'embed_tokens' in _n:
                 ende = _n.split('.')[0]
                 _key = f"{ende}.embedding_c"
-                _indices = pd[_key] if _key in pd else []
+                _indices = pruning_dict[_key] if _key in pruning_dict else []
 
                 _p.grad[:,_indices] = 0.
                 _v['exp_avg'][:,_indices] = 0.
@@ -299,24 +305,24 @@ class Adam(torch.optim.Optimizer):
                 continue
 
             elif 'layer_norm' in _n:
-                ende, ly, type, wb = _parsing(_n)
+                ende, layer, _, _ = _parsing(_n)
                 _key = f"{ende}.embedding_c"
-                _indices = pd[_key] if _key in pd else []
+                _indices = pruning_dict[_key] if _key in pruning_dict else []
                 _p.grad[_indices] = 0.
                 _v['exp_avg'][_indices] = 0.
                 _v['exp_avg_sq'][_indices] = 0.
 
             elif 'fc' in _n:
                 # fc layers
-                ende, ly, type, wb = _parsing(_n)
+                ende, layer, _, _ = _parsing(_n)
 
                 # Get global and local masks
                 global_key = f'{ende}.embedding_c'
-                local_key = f'{ende}.layers.{ly}.fc_c'
+                local_key = f'{ende}.layers.{layer}.fc_c'
 
-                global_indices = pd[global_key] if global_key in pd else []
-                local_indices = pd[local_key] if local_key in pd else []
-                
+                global_indices = pruning_dict[global_key] if global_key in pruning_dict else []
+                local_indices = pruning_dict[local_key] if local_key in pruning_dict else []
+
                 if 'fc2' in _n:
                     if 'bias' in _n:
                         _p.grad[global_indices] = 0.
@@ -345,15 +351,15 @@ class Adam(torch.optim.Optimizer):
                         _v['exp_avg_sq'][:,global_indices] = 0.
                         _v['exp_avg_sq'][local_indices,:] = 0.
 
-            else:                
-                ende, ly, type, wb = _parsing(_n)
+            else:
+                ende, layer, _, _ = _parsing(_n)
                 # Get global and local masks
                 if 'self_attn' in _n:
                     global_key = f'{ende}.embedding_c'
                     if 'q_proj' in _n or 'k_proj' in _n:
-                        local_key = f'{ende}.layers.{ly}.self_attn_qk_c'
+                        local_key = f'{ende}.layers.{layer}.self_attn_qk_c'
                     else:
-                        local_key = f'{ende}.layers.{ly}.self_attn_vo_c'
+                        local_key = f'{ende}.layers.{layer}.self_attn_vo_c'
                 else:
                     # encoder_attn
                     if 'k_proj' in _n or 'v_proj' in _n:
@@ -362,12 +368,12 @@ class Adam(torch.optim.Optimizer):
                         global_key = 'decoder.embedding_c'
 
                     if 'q_proj' in _n or 'k_proj' in _n:
-                        local_key = f'{ende}.layers.{ly}.encoder_attn_qk_c'
+                        local_key = f'{ende}.layers.{layer}.encoder_attn_qk_c'
                     else:
-                        local_key = f'{ende}.layers.{ly}.encoder_attn_vo_c'
+                        local_key = f'{ende}.layers.{layer}.encoder_attn_vo_c'
 
-                global_indices = pd[global_key] if global_key in pd else []
-                local_indices = pd[local_key] if local_key in pd else []
+                global_indices = pruning_dict[global_key] if global_key in pruning_dict else []
+                local_indices = pruning_dict[local_key] if local_key in pruning_dict else []
 
                 if 'out_proj' in _n:
                     if 'bias' in _n:
@@ -397,13 +403,14 @@ class Adam(torch.optim.Optimizer):
                         _v['exp_avg_sq'][local_indices,:] = 0.
 
     def pruning(self, _model):
-        pm = _model.pm
-        pd = pm.pruning_dict
+        """pruning gradient and exp avg, exp_avg_sq"""
+        pruning_manager = _model.pm
+        pruning_dict = pruning_manager.pruning_dict
 
-        en_heads = _model.cfg.encoder.attention_heads
-        de_heads = _model.cfg.decoder.attention_heads
+        _ = _model.cfg.encoder.attention_heads  # en_heads
+        _ = _model.cfg.decoder.attention_heads  # de_heads
 
-        named_params = list(_model.named_parameters())
+        _ = list(_model.named_parameters())  # named_params
         param_list = []
         param_names = []
 
@@ -414,7 +421,7 @@ class Adam(torch.optim.Optimizer):
                 continue
             param_list.append(_p)
             param_names.append(_n)
-            
+
         self.param_groups[0]['params'] = param_list
         _dict = {}
 
@@ -432,36 +439,36 @@ class Adam(torch.optim.Optimizer):
             elif 'embed_tokens' in _n:
                 ende = _n.split('.')[0]
                 _key = f"{ende}.embedding_c"
-                mask = get_pruning_mask(_shape[1], pd[_key])
+                mask = get_pruning_mask(_shape[1], pruning_dict[_key])
                 _v['exp_avg'] = _v['exp_avg'][:, mask]
                 _v['exp_avg_sq'] = _v['exp_avg_sq'][:, mask]
             elif 'output_projection' in _n:
                 continue
 
             elif 'layer_norm' in _n:
-                ende, ly, type, wb = _parsing(_n)
-                if 'self' in type:
+                ende, layer, type_, _ = _parsing(_n)
+                if 'self' in type_:
                     _type = 'self_attn'
-                elif 'encoder' in type:
+                elif 'encoder' in type_:
                     _type = 'encoder_attn'
                 else:
                     _type = 'fc'
                 _key = f"{ende}.embedding_c"
-                mask = get_pruning_mask(_shape[0], pd[_key])
+                mask = get_pruning_mask(_shape[0], pruning_dict[_key])
 
                 _v['exp_avg'] = _v['exp_avg'][mask]
                 _v['exp_avg_sq'] = _v['exp_avg_sq'][mask]
 
             elif 'fc' in _n:
                 # fc layers
-                ende, ly, type, wb = _parsing(_n)
+                ende, layer, type_, _ = _parsing(_n)
 
                 # Get global and local masks
                 global_key = f'{ende}.embedding_c'
-                local_key = f'{ende}.layers.{ly}.fc_c'
+                local_key = f'{ende}.layers.{layer}.fc_c'
 
-                global_indices = pd[global_key] if global_key in pd else []
-                local_indices = pd[local_key] if local_key in pd else []
+                global_indices = pruning_dict[global_key] if global_key in pruning_dict else []
+                local_indices = pruning_dict[local_key] if local_key in pruning_dict else []
 
                 if 'fc2' in _n:
                     if 'bias' in _n:
@@ -485,31 +492,31 @@ class Adam(torch.optim.Optimizer):
                         _v['exp_avg_sq'] = _v['exp_avg_sq'][local_mask,:][:,global_mask]
             else:
                 # qkvo_proj
-                
-                ende, ly, type, wb = _parsing(_n)
+
+                ende, layer, type_, _ = _parsing(_n)
                 # Get global and local masks
                 if 'self_attn' in _n:
                     global_key = f'{ende}.embedding_c'
                     if 'q_proj' in _n or 'k_proj' in _n:
-                        local_key = f'{ende}.layers.{ly}.self_attn_qk_c'
+                        local_key = f'{ende}.layers.{layer}.self_attn_qk_c'
                     else:
-                        local_key = f'{ende}.layers.{ly}.self_attn_vo_c'
+                        local_key = f'{ende}.layers.{layer}.self_attn_vo_c'
                 else:
                     # encoder_attn
                     if 'k_proj' in _n or 'v_proj' in _n:
-                        global_key = f'encoder.embedding_c'
+                        global_key = 'encoder.embedding_c'
                     else:
-                        global_key = f'decoder.embedding_c'
+                        global_key = 'decoder.embedding_c'
 
                     if 'q_proj' in _n or 'k_proj' in _n:
-                        local_key = f'{ende}.layers.{ly}.encoder_attn_qk_c'
+                        local_key = f'{ende}.layers.{layer}.encoder_attn_qk_c'
                     else:
-                        local_key = f'{ende}.layers.{ly}.encoder_attn_vo_c'
+                        local_key = f'{ende}.layers.{layer}.encoder_attn_vo_c'
 
-                global_indices = pd[global_key] if global_key in pd else []
-                local_indices = pd[local_key] if local_key in pd else []
+                global_indices = pruning_dict[global_key] if global_key in pruning_dict else []
+                local_indices = pruning_dict[local_key] if local_key in pruning_dict else []
 
-                # Compute loss 
+                # Compute loss
                 if 'out_proj' in _n:
                     if 'bias' in _n:
                         global_mask = get_pruning_mask(_shape[0],  global_indices)
@@ -539,10 +546,10 @@ def _parsing(_name):
     assert 'embed_tokens' not in _name
     _l = _name.split('.')
     if 'attn' in _name and 'layer_norm' not in _name:
-        ende, ly, type, wb = _l[0], _l[2], f'{_l[3]}.{_l[4]}',_l[5]
+        ende, layer, type_, w_b = _l[0], _l[2], f'{_l[3]}.{_l[4]}',_l[5]
     else:
         try:
-            ende, ly, type, wb = _l[0], _l[2], _l[3],_l[4]
-        except Exception:
+            ende, layer, type_, w_b = _l[0], _l[2], _l[3],_l[4]
+        except IndexError:
             print("* Name: ", _name)
-    return ende, ly, type, wb
+    return ende, layer, type_, w_b
