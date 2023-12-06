@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="ko" >
+<head>
+  <meta charset="utf-8" /><meta name="generator" content="Docutils 0.18.1: http://docutils.sourceforge.net/" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Models &mdash; SRP 1.0 documentation</title>
+      <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+      <link rel="stylesheet" href="../_static/css/theme.css" type="text/css" />
+  <!--[if lt IE 9]>
+    <script src="../_static/js/html5shiv.min.js"></script>
+  <![endif]-->
+  
+        <script src="../_static/jquery.js?v=5d32c60e"></script>
+        <script src="../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+        <script src="../_static/documentation_options.js?v=f2a433a1"></script>
+        <script src="../_static/doctools.js?v=888ff710"></script>
+        <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="prev" title="Train and Test" href="train_test.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../index.html" class="icon icon-home">
+            SRP
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+
+<li class="toctree-l1"><a class="reference internal" href="./criterions.html">Criterions</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Models</a>
+  <ul>
+    <li class="toctree-l2"><a class="reference internal" href="#utils.timer.Timer"><code class="docutils literal notranslate"><span class="pre">srp_base.py</span></code></a><ul>
+    <li class="toctree-l3"><a class="reference internal" href="#utils.timer.Timer.tic"><code class="docutils literal notranslate"><span class="pre">srp_base.SRPModelBase()</span></code></a></li>
+    <li class="toctree-l3"><a class="reference internal" href="#utils.timer.Timer.tic"><code class="docutils literal notranslate"><span class="pre">srp_base.set_param()</span></code></a></li>
+    <li class="toctree-l3"><a class="reference internal" href="#utils.timer.Timer.tic"><code class="docutils literal notranslate"><span class="pre">srp_base.recursive_get_param()</span></code></a></li>
+    <li class="toctree-l3"><a class="reference internal" href="#utils.timer.Timer.tic"><code class="docutils literal notranslate"><span class="pre">srp_base.embedding()</span></code></a></li>
+    <li class="toctree-l3"><a class="reference internal" href="#utils.timer.Timer.tic"><code class="docutils literal notranslate"><span class="pre">srp_base.PruningManager()</span></code></a></li>
+    <li class="toctree-l3"><a class="reference internal" href="#utils.timer.Timer.tic"><code class="docutils literal notranslate"><span class="pre">srp_base._parsing()</span></code></a></li>
+    </ul></li>
+
+    <li class="toctree-l2"><a class="reference internal" href="#utils.timer.Timer"><code class="docutils literal notranslate"><span class="pre">srp_config.py</span></code></a><ul>
+    <li class="toctree-l3"><a class="reference internal" href="#utils.timer.Timer.tic"><code class="docutils literal notranslate"><span class="pre">srp_config.EncDecBaseConfig()</span></code></a></li>
+    <li class="toctree-l3"><a class="reference internal" href="#utils.timer.Timer.tic"><code class="docutils literal notranslate"><span class="pre">srp_config.DecoderConfig()</span></code></a></li>
+    <li class="toctree-l3"><a class="reference internal" href="#utils.timer.Timer.tic"><code class="docutils literal notranslate"><span class="pre">srp_config.QuantNoiseConfig()</span></code></a></li>
+    <li class="toctree-l3"><a class="reference internal" href="#utils.timer.Timer.tic"><code class="docutils literal notranslate"><span class="pre">srp_config.SRPConfig()</span></code></a></li>
+    </ul></li>
+
+    <li class="toctree-l2"><a class="reference internal" href="#utils.timer.Timer"><code class="docutils literal notranslate"><span class="pre">srp_decoder.py</span></code></a><ul>
+    <li class="toctree-l3"><a class="reference internal" href="#utils.timer.Timer.tic"><code class="docutils literal notranslate"><span class="pre">srp_decoder.module_name_fordropout()</span></code></a></li>
+    <li class="toctree-l3"><a class="reference internal" href="#utils.timer.Timer.tic"><code class="docutils literal notranslate"><span class="pre">srp_decoder.SRPDecoderBase()</span></code></a></li>
+    <li class="toctree-l3"><a class="reference internal" href="#utils.timer.Timer.tic"><code class="docutils literal notranslate"><span class="pre">srp_decoder.linear_layer()</span></code></a></li>
+    <li class="toctree-l3"><a class="reference internal" href="#utils.timer.Timer.tic"><code class="docutils literal notranslate"><span class="pre">srp_decoder.SRPDecoder()</span></code></a></li>
+    </ul></li>
+
+    <li class="toctree-l2"><a class="reference internal" href="#utils.timer.Timer"><code class="docutils literal notranslate"><span class="pre">srp_encoder.py</span></code></a><ul>
+    <li class="toctree-l3"><a class="reference internal" href="#utils.timer.Timer.tic"><code class="docutils literal notranslate"><span class="pre">srp_encoder.module_name_fordropout()</span></code></a></li>
+    <li class="toctree-l3"><a class="reference internal" href="#utils.timer.Timer.tic"><code class="docutils literal notranslate"><span class="pre">srp_encoder.SRPEncoderBase()</span></code></a></li>
+    <li class="toctree-l3"><a class="reference internal" href="#utils.timer.Timer.tic"><code class="docutils literal notranslate"><span class="pre">srp_encoder.SRPEncoder()</span></code></a></li>
+    </ul></li>
+
+    <li class="toctree-l2"><a class="reference internal" href="#utils.timer.Timer"><code class="docutils literal notranslate"><span class="pre">srp_legacy.py</span></code></a><ul>
+    <li class="toctree-l3"><a class="reference internal" href="#utils.timer.Timer.tic"><code class="docutils literal notranslate"><span class="pre">srp_legacy.SRPModel()</span></code></a></li>
+    <li class="toctree-l3"><a class="reference internal" href="#utils.timer.Timer.tic"><code class="docutils literal notranslate"><span class="pre">srp_legacy.base_architecture()</span></code></a></li>
+    <li class="toctree-l3"><a class="reference internal" href="#utils.timer.Timer.tic"><code class="docutils literal notranslate"><span class="pre">srp_legacy.srp_iwslt_de_en()</span></code></a></li>
+    <li class="toctree-l3"><a class="reference internal" href="#utils.timer.Timer.tic"><code class="docutils literal notranslate"><span class="pre">srp_legacy.srp_wmt_en_de()</span></code></a></li>
+    <li class="toctree-l3"><a class="reference internal" href="#utils.timer.Timer.tic"><code class="docutils literal notranslate"><span class="pre">srp_legacy.srp_vaswani_wmt_en_de_big()</span></code></a></li>
+
+    </ul></li>
+
+  </ul>
+</li>
+
+<li class="toctree-l1"><a class="reference internal" href="./modules.html">Modules</a></li>
+<li class="toctree-l1"><a class="reference internal" href="./optim.html">Optim</a></li>
+<li class="toctree-l1"><a class="reference internal" href="./tasks.html">Tasks</a></li>
+
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../index.html">SRP</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../index.html" class="icon icon-home" aria-label="Home"></a></li>
+      <li class="breadcrumb-item active">Models</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="../_sources/modules/utils.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="module-utils.compression_cal">
+<span id="utils"></span><h1>Models<a class="headerlink" href="#module-utils.compression_cal" title="Link to this heading"></a></h1>
+
+<blockquote>
+<div><p><a class="reference external" href="http://www.apache.org/licenses/LICENSE-2.0">http://www.apache.org/licenses/LICENSE-2.0</a></p>
+</div></blockquote>
+
+<p>
+    Starlab Transformer Compression with SRP (Selectively Regularized Pruning)<br>
+    <br>
+    Author: Hyojin Jeon (tarahjjeon@snu.ac.kr), Seoul National University<br>
+    Seungcheol Park (ant6si@snu.ac.kr), Seoul National University<br>
+    U Kang (ukang@snu.ac.kr), Seoul National University<br>
+    <br>
+    Version : 1.0<br>
+    Date : Nov 29, 2022<br>
+    Main Contact: Hyojin Jeon<br>
+    <br>
+    This software is free of charge under research purposes.<br>
+    For commercial purposes, please contact the authors.<br>
+    This code is mainly based on the [GitHub Repository]<br>
+    [GitHub Repository]: <a class="reference external" href="https://github.com/facebookresearch/fairseq">https://github.com/facebookresearch/fairseq</a><br>
+</p>
+
+<p>SRP: Selectively Regularized Pruning</p>
+
+<dl class="simple">
+<dt>File: models/srp_base.py</dt><dd><ul class="simple">
+<li><p>SRP model based on `"Attention Is All You Need" (Vaswani, et al, 2017) https://arxiv.org/abs/1706.03762.</p></li>
+</ul>
+</dd>
+</dl>
+
+<!-- <dl class="py function">
+<dt class="sig sig-object py" id="utils.compression_cal.print_model_parm_flops">
+<span class="sig-prename descclassname"><span class="pre">utils.compression_cal.</span></span><span class="sig-name descname"><span class="pre">print_model_parm_flops</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">net</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">imagenet</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#utils.compression_cal.print_model_parm_flops" title="Link to this definition"></a></dt>
+<dd><p>Counting number of parameters in the model</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>net</strong> – the model to be calculated for parameters and flops</p></li>
+<li><p><strong>imagenet</strong> – which dataset is used</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl> -->
+
+<dl class="simple">
+<dt>File: models/srp_config.py</dt><dd><ul class="simple">
+<li><p>Config for Encoder and Decoder.</p></li>
+</ul>
+</dd>
+</dl>
+    
+<!-- <dl class="py function">
+<dt class="sig sig-object py" id="utils.compression_cal.print_model_parm_flops">
+<span class="sig-prename descclassname"><span class="pre">utils.compression_cal.</span></span><span class="sig-name descname"><span class="pre">print_model_parm_flops</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">net</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">imagenet</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#utils.compression_cal.print_model_parm_flops" title="Link to this definition"></a></dt>
+<dd><p>Counting number of parameters in the model</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>net</strong> – the model to be calculated for parameters and flops</p></li>
+<li><p><strong>imagenet</strong> – which dataset is used</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl> -->
+
+<dl class="simple">
+<dt>File: models/srp_decoder.py</dt><dd><ul class="simple">
+<li><p>SRP decoder consisting of *cfg.decoder.layers* layers. Each layer is a :class:`SRPDecoderLayer`.</p></li>
+</ul>
+</dd>
+</dl>
+<!--         
+<dl class="py function">
+<dt class="sig sig-object py" id="utils.compression_cal.print_model_parm_flops">
+<span class="sig-prename descclassname"><span class="pre">utils.compression_cal.</span></span><span class="sig-name descname"><span class="pre">print_model_parm_flops</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">net</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">imagenet</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#utils.compression_cal.print_model_parm_flops" title="Link to this definition"></a></dt>
+<dd><p>Counting number of parameters in the model</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>net</strong> – the model to be calculated for parameters and flops</p></li>
+<li><p><strong>imagenet</strong> – which dataset is used</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl> -->
+
+<dl class="simple">
+<dt>File: models/srp_encoder.py</dt><dd><ul class="simple">
+<li><p>SRP encoder consisting of *cfg.encoder.layers* layers. Each layer is a :class:`SRPEncoderLayer`.</p></li>
+</ul>
+</dd>
+</dl>
+
+<!-- <dl class="py function">
+<dt class="sig sig-object py" id="utils.compression_cal.print_model_parm_flops">
+<span class="sig-prename descclassname"><span class="pre">utils.compression_cal.</span></span><span class="sig-name descname"><span class="pre">print_model_parm_flops</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">net</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">imagenet</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#utils.compression_cal.print_model_parm_flops" title="Link to this definition"></a></dt>
+<dd><p>Counting number of parameters in the model</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>net</strong> – the model to be calculated for parameters and flops</p></li>
+<li><p><strong>imagenet</strong> – which dataset is used</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl> -->
+
+<dl class="simple">
+<dt>File: models/srp_legacy.py</dt><dd><ul class="simple">
+<li><p>This is the legacy implementation of the srp model that uses argparse for configuration.</p></li>
+</ul>
+</dd>
+</dl>
+
+<!-- <dl class="py function">
+<dt class="sig sig-object py" id="utils.compression_cal.print_model_parm_flops">
+<span class="sig-prename descclassname"><span class="pre">utils.compression_cal.</span></span><span class="sig-name descname"><span class="pre">print_model_parm_flops</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">net</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">imagenet</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#utils.compression_cal.print_model_parm_flops" title="Link to this definition"></a></dt>
+<dd><p>Counting number of parameters in the model</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>net</strong> – the model to be calculated for parameters and flops</p></li>
+<li><p><strong>imagenet</strong> – which dataset is used</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl> -->
+
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="train_test.html" class="btn btn-neutral float-left" title="Train and Test" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2023, dmlab.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

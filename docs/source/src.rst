@@ -7,13 +7,16 @@ Subpackages
 .. toctree::
    :maxdepth: 4
 
-   src.models
-   src.modules
+   criterions
+   models
+   modules
+   optim
+   task
 
 Submodules
 ----------
 
-src.checkpoint\_utils module
+src.checkpoint_utils module
 ----------------------------
 
 .. automodule:: src.checkpoint_utils
@@ -29,7 +32,7 @@ src.finetuning module
    :undoc-members:
    :show-inheritance:
 
-src.flops\_counter module
+src.flops_counter module
 -------------------------
 
 .. automodule:: src.flops_counter

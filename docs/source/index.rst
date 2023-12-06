@@ -10,7 +10,7 @@ Welcome to SRP's documentation!
    :maxdepth: 2
    :caption: Contents:
 
-   modules
+   src
 
 Indices and tables
 ==================

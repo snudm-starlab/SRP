@@ -43,8 +43,69 @@
 </div>
         </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
               <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+
+<!-- <ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="imagenetutils.html">ImageNetUtils</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Models</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#models.falcon.GEPdecompose"><code class="docutils literal notranslate"><span class="pre">GEPdecompose</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#models.falcon.GEPdecompose.decompose"><code class="docutils literal notranslate"><span class="pre">GEPdecompose.decompose()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#models.falcon.GEPdecompose.decompose_rank"><code class="docutils literal notranslate"><span class="pre">GEPdecompose.decompose_rank()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#models.falcon.GEPdecompose.forward"><code class="docutils literal notranslate"><span class="pre">GEPdecompose.forward()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#models.falcon.GEPdecompose.group1x1"><code class="docutils literal notranslate"><span class="pre">GEPdecompose.group1x1()</span></code></a></li>
+</ul>
+</li> -->
 <ul>
-<li class="toctree-l1"><a class="reference internal" href="modules.html">src</a></li>
+  <li class="toctree-l1"><a class="reference internal" href="modules/criterions.html">Criterions</a>
+    <ul>
+      <li class="toctree-l2"><a class="reference internal" href="modules/criterions.html"><code class="docutils literal notranslate"><span class="pre">srp.py</span></code></a>
+      </li>
+    </ul>
+  </li>
+
+  <li class="toctree-l1"><a class="reference internal" href="modules/models.html">Models</a>
+    <ul>
+      <li class="toctree-l2"><a class="reference internal" href="modules/models.html"><code class="docutils literal notranslate"><span class="pre">srp_base.py</span></code></a>
+      <li class="toctree-l2"><a class="reference internal" href="modules/models.html"><code class="docutils literal notranslate"><span class="pre">srp_config.py</span></code></a>
+      <li class="toctree-l2"><a class="reference internal" href="modules/models.html"><code class="docutils literal notranslate"><span class="pre">srp_decoder.py</span></code></a>
+      <li class="toctree-l2"><a class="reference internal" href="modules/models.html"><code class="docutils literal notranslate"><span class="pre">srp_encoder.py</span></code></a>
+      <li class="toctree-l2"><a class="reference internal" href="#modules/models.html"><code class="docutils literal notranslate"><span class="pre">srp_legact.py</span></code></a>
+      </li>
+    </ul>
+  </li>
+
+  <li class="toctree-l1"><a class="reference internal" href="modules/modules.html">Modules</a>
+    <ul>
+      <li class="toctree-l2"><a class="reference internal" href="modules/modules.html"><code class="docutils literal notranslate"><span class="pre">layer_norm.py</span></code></a>
+      <li class="toctree-l2"><a class="reference internal" href="modules/modules.html"><code class="docutils literal notranslate"><span class="pre">multihead_attention.py</span></code></a>
+      <li class="toctree-l2"><a class="reference internal" href="modules/modules.html"><code class="docutils literal notranslate"><span class="pre">srp_layer.py</span></code></a>
+      </li>
+    </ul>
+  </li>
+
+  <li class="toctree-l1"><a class="reference internal" href="modules/optim.html">Optim</a>
+    <ul>
+      <li class="toctree-l2"><a class="reference internal" href="modules/optim.html"><code class="docutils literal notranslate"><span class="pre">srp_adam.py</span></code></a>
+      </li>
+    </ul>
+  </li>
+
+  <li class="toctree-l1"><a class="reference internal" href="modules/tasks.html">Tasks</a>
+    <ul>
+      <li class="toctree-l2"><a class="reference internal" href="modules/tasks.html"><code class="docutils literal notranslate"><span class="pre">srp_translation.py</span></code></a>
+      </li>
+    </ul>
+  </li>
+
+  <li class="toctree-l1"><a class="reference internal" href="modules/src.html">checkpoint_utils.py</a></li>
+  <li class="toctree-l1"><a class="reference internal" href="modules/src.html">finetuning.py</a></li>
+  <li class="toctree-l1"><a class="reference internal" href="modules/src.html">flops_counter.py</a></li>
+  <li class="toctree-l1"><a class="reference internal" href="modules/src.html">generate.py</a></li>
+  <li class="toctree-l1"><a class="reference internal" href="modules/src.html">pruning.py</a></li>
+  <li class="toctree-l1"><a class="reference internal" href="modules/src.html">sequence_generator.py</a></li>
+  <li class="toctree-l1"><a class="reference internal" href="modules/src.html">train.py</a></li>
+  <li class="toctree-l1"><a class="reference internal" href="modules/src.html">trainer.py</a></li>
+  <li class="toctree-l1"><a class="reference internal" href="modules/src.html">unit_test.py</a></li>
+
 </ul>
 
         </div>
@@ -75,11 +136,56 @@
 <h1>Welcome to SRP’s documentation!<a class="headerlink" href="#welcome-to-srp-s-documentation" title="Link to this heading"></a></h1>
 <div class="toctree-wrapper compound">
 <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+
 <ul>
-<li class="toctree-l1"><a class="reference internal" href="modules.html">src</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="src.html">src package</a></li>
-</ul>
-</li>
+  <li class="toctree-l1"><a class="reference internal" href="modules/criterions.html">Criterions</a><ul>
+  <li class="toctree-l2"><a class="reference internal" href="modules/criterions.html">srp.py</a></li>
+  </ul>
+  </li>
+  
+  <ul>
+  <li class="toctree-l1"><a class="reference internal" href="modules/models.html">Models</a><ul>
+  <li class="toctree-l2"><a class="reference internal" href="modules/models.html">srp_base.py</a></li>
+  <li class="toctree-l2"><a class="reference internal" href="modules/models.html">srp_config.py</a></li>
+  <li class="toctree-l2"><a class="reference internal" href="modules/models.html">srp_decoder.py</a></li>
+  <li class="toctree-l2"><a class="reference internal" href="modules/models.html">srp_encoder.py</a></li>
+  <li class="toctree-l2"><a class="reference internal" href="modules/models.html">srp_legacy.py</a></li>
+  </ul>
+  </li>
+  
+  <ul>
+  <li class="toctree-l1"><a class="reference internal" href="modules/modules.html">Modules</a><ul>
+    <li class="toctree-l2"><a class="reference internal" href="modules/modules.html">layer_norm.py</a></li>
+    <li class="toctree-l2"><a class="reference internal" href="modules/modules.html">multihead_attention.py</a></li>
+    <li class="toctree-l2"><a class="reference internal" href="modules/modules.html">srp_layer.py</a></li>
+  </ul>
+  </li>
+  
+  <ul>
+  <li class="toctree-l1"><a class="reference internal" href="modules/optim.html">Optim</a><ul>
+  <li class="toctree-l2"><a class="reference internal" href="modules/optim.html">srp_adam.py</a></li>
+  </ul>
+  </li>
+  
+  <ul>
+  <li class="toctree-l1"><a class="reference internal" href="modules/tasks.html">Task</a><ul>
+  <li class="toctree-l2"><a class="reference internal" href="modules/tasks.html">srp_translation.py</a></li>
+  </ul>
+  </li>
+  
+  <ul>
+  <li class="toctree-l1"><a class="reference internal" href="modules/src.html">checkpoint_utils.py</a></li>
+  <li class="toctree-l1"><a class="reference internal" href="modules/src.html">finetuning.py</a></li>
+  <li class="toctree-l1"><a class="reference internal" href="modules/src.html">flops_counter.py</a></li>
+  <li class="toctree-l1"><a class="reference internal" href="modules/src.html">generate.py</a></li>
+  <li class="toctree-l2"><a class="reference internal" href="modules/src.html">pruning.py</a></li>
+  <li class="toctree-l2"><a class="reference internal" href="modules/src.html">sequence_generator.py</a></li>
+  <li class="toctree-l2"><a class="reference internal" href="modules/src.html">train.py</a></li>
+  <li class="toctree-l2"><a class="reference internal" href="modules/src.html">trainer.py</a></li>
+  <li class="toctree-l2"><a class="reference internal" href="modules/src.html">unit_test.py</a></li>
+  </ul>
+  </li>
+
 </ul>
 </div>
 </section>

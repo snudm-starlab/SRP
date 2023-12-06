@@ -4,7 +4,7 @@ src.modules package
 Submodules
 ----------
 
-src.modules.layer\_norm module
+src.modules.layer_norm module
 ------------------------------
 
 .. automodule:: src.modules.layer_norm
@@ -12,7 +12,7 @@ src.modules.layer\_norm module
    :undoc-members:
    :show-inheritance:
 
-src.modules.multihead\_attention module
+src.modules.multihead_attention module
 ---------------------------------------
 
 .. automodule:: src.modules.multihead_attention
@@ -20,7 +20,7 @@ src.modules.multihead\_attention module
    :undoc-members:
    :show-inheritance:
 
-src.modules.srp\_layer module
+src.modules.srp_layer module
 -----------------------------
 
 .. automodule:: src.modules.srp_layer

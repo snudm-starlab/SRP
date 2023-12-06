@@ -4,7 +4,7 @@ src.models package
 Submodules
 ----------
 
-src.models.srp\_base module
+src.models.srp_base module
 ---------------------------
 
 .. automodule:: src.models.srp_base
@@ -12,7 +12,7 @@ src.models.srp\_base module
    :undoc-members:
    :show-inheritance:
 
-src.models.srp\_config module
+src.models.srp_config module
 -----------------------------
 
 .. automodule:: src.models.srp_config
@@ -20,7 +20,7 @@ src.models.srp\_config module
    :undoc-members:
    :show-inheritance:
 
-src.models.srp\_decoder module
+src.models.srp_decoder module
 ------------------------------
 
 .. automodule:: src.models.srp_decoder
@@ -28,7 +28,7 @@ src.models.srp\_decoder module
    :undoc-members:
    :show-inheritance:
 
-src.models.srp\_encoder module
+src.models.srp_encoder module
 ------------------------------
 
 .. automodule:: src.models.srp_encoder
@@ -36,7 +36,7 @@ src.models.srp\_encoder module
    :undoc-members:
    :show-inheritance:
 
-src.models.srp\_legacy module
+src.models.srp_legacy module
 -----------------------------
 
 .. automodule:: src.models.srp_legacy

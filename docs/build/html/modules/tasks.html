@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="ko" >
+<head>
+  <meta charset="utf-8" /><meta name="generator" content="Docutils 0.18.1: http://docutils.sourceforge.net/" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tasks &mdash; SRP 1.0 documentation</title>
+      <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+      <link rel="stylesheet" href="../_static/css/theme.css" type="text/css" />
+  <!--[if lt IE 9]>
+    <script src="../_static/js/html5shiv.min.js"></script>
+  <![endif]-->
+  
+        <script src="../_static/jquery.js?v=5d32c60e"></script>
+        <script src="../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+        <script src="../_static/documentation_options.js?v=f2a433a1"></script>
+        <script src="../_static/doctools.js?v=888ff710"></script>
+        <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="prev" title="Train and Test" href="train_test.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../index.html" class="icon icon-home">
+            SRP
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="./criterions.html">Criterions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="./models.html">Models</a></li>
+<li class="toctree-l1"><a class="reference internal" href="./modules.html">Modules</a></li>
+<li class="toctree-l1"><a class="reference internal" href="./optim.html">Optim</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Tasks</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#utils.timer.Timer"><code class="docutils literal notranslate"><span class="pre">srp_translation.py</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#utils.timer.Timer.tic"><code class="docutils literal notranslate"><span class="pre">srp_translation.load_langpair_dataset()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#utils.timer.Timer.tic"><code class="docutils literal notranslate"><span class="pre">srp_translation.SRPTranslationConfig()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#utils.timer.Timer.tic"><code class="docutils literal notranslate"><span class="pre">srp_translation.SRPTranslationTask()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../index.html">SRP</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../index.html" class="icon icon-home" aria-label="Home"></a></li>
+      <li class="breadcrumb-item active">Tasks</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="../_sources/modules/utils.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="module-utils.compression_cal">
+<span id="utils"></span><h1>Tasks<a class="headerlink" href="#module-utils.compression_cal" title="Link to this heading"></a></h1>
+
+<blockquote>
+<div><p><a class="reference external" href="http://www.apache.org/licenses/LICENSE-2.0">http://www.apache.org/licenses/LICENSE-2.0</a></p>
+</div></blockquote>
+
+<p>
+    Starlab Transformer Compression with SRP (Selectively Regularized Pruning)<br>
+    <br>
+    Author: Hyojin Jeon (tarahjjeon@snu.ac.kr), Seoul National University<br>
+    Seungcheol Park (ant6si@snu.ac.kr), Seoul National University<br>
+    U Kang (ukang@snu.ac.kr), Seoul National University<br>
+    <br>
+    Version : 1.0<br>
+    Date : Nov 29, 2022<br>
+    Main Contact: Hyojin Jeon<br>
+    <br>
+    This software is free of charge under research purposes.<br>
+    For commercial purposes, please contact the authors.<br>
+    This code is mainly based on the [GitHub Repository]<br>
+    [GitHub Repository]: <a class="reference external" href="https://github.com/facebookresearch/fairseq">https://github.com/facebookresearch/fairseq</a><br>
+</p>
+
+<p>SRP: Selectively Regularized Pruning</p>
+
+<dl class="simple">
+<dt>File: tasks/srp_translation.py</dt><dd><ul class="simple">
+<li><p>Contain source code for adding tasks of srp translation to fairseq tasks.</p></li>
+</ul>
+</dd>
+</dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="task.srp_translation.load_langpair_dataset">
+<span class="sig-prename descclassname"><span class="pre">tasks.srp_translation.</span></span>
+<span class="sig-name descname"><span class="pre">load_langpair_dataset</span></span>
+<span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">data_path</span></span></em>, 
+<em class="sig-param"><span class="n"><span class="pre">split</span></span></em>, 
+<em class="sig-param"><span class="n"><span class="pre">src</span></span></em>, 
+<em class="sig-param"><span class="n"><span class="pre">src_dict</span></span></em>, 
+<em class="sig-param"><span class="n"><span class="pre">tgt</span></span></em>, 
+<em class="sig-param"><span class="n"><span class="pre">tgt_dict</span></span></em>, 
+<em class="sig-param"><span class="n"><span class="pre">combine</span></span></em>, 
+<em class="sig-param"><span class="n"><span class="pre">dataset_impl</span></span></em>, 
+<em class="sig-param"><span class="n"><span class="pre">upsample_primary</span></span></em>, 
+<em class="sig-param"><span class="n"><span class="pre">left_pad_source</span></span></em>, 
+<em class="sig-param"><span class="n"><span class="pre">left_pad_target</span></span></em>, 
+<em class="sig-param"><span class="n"><span class="pre">max_source_positions</span></span></em>, 
+<em class="sig-param"><span class="n"><span class="pre">max_target_positions</span></span></em>, 
+
+<em class="sig-param"><span class="n"><span class="pre">prepend_bos</span></span>
+<span class="o"><span class="pre">=</span></span>
+<span class="default_value"><span class="pre">False</span></span></em>, 
+
+<em class="sig-param"><span class="n"><span class="pre">load_alignments</span></span>
+<span class="o"><span class="pre">=</span></span>
+<span class="default_value"><span class="pre">False</span></span></em>, 
+
+<em class="sig-param"><span class="n"><span class="pre">truncate_source</span></span>
+<span class="o"><span class="pre">=</span></span>
+<span class="default_value"><span class="pre">False</span></span></em>, 
+
+<em class="sig-param"><span class="n"><span class="pre">append_source_id</span></span>
+<span class="o"><span class="pre">=</span></span>
+<span class="default_value"><span class="pre">False</span></span></em>, 
+
+<em class="sig-param"><span class="n"><span class="pre">num_buckets</span></span>
+<span class="o"><span class="pre">=</span></span>
+<span class="default_value"><span class="pre">0</span></span></em>, 
+
+<em class="sig-param"><span class="n"><span class="pre">shuffle</span></span>
+<span class="o"><span class="pre">=</span></span>
+<span class="default_value"><span class="pre">True</span></span></em>, 
+
+<em class="sig-param"><span class="n"><span class="pre">pad_to_multiple</span></span>
+<span class="o"><span class="pre">=</span></span>
+<span class="default_value"><span class="pre">1</span></span></em>, 
+
+<em class="sig-param"><span class="n"><span class="pre">prepend_bos_src</span></span>
+<span class="o"><span class="pre">=</span></span>
+<span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span>
+
+<a class="headerlink" href="#utils.compression_cal.print_model_parm_flops" title="Link to this definition"></a></dt>
+<dd><p>Load En-De pair dataset</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>data_path</strong> </p></li>
+<li><p><strong>split</strong> </p></li>
+<li><p><strong>src</strong> </p></li>
+<li><p><strong>src_dict</strong> </p></li>
+<li><p><strong>tgt</strong> </p></li>
+<li><p><strong>tgt_dict</strong> </p></li>
+<li><p><strong>combine</strong> </p></li>
+<li><p><strong>dataset_impl</strong> </p></li>
+<li><p><strong>upsample_primary</strong> </p></li>
+<li><p><strong>left_pad_source</strong> </p></li>
+<li><p><strong>left_pad_target</strong> </p></li>
+<li><p><strong>max_source_positions</strong> </p></li>
+<li><p><strong>max_target_positions</strong> </p></li>
+<li><p><strong>prepend_bos</strong> </p></li>
+<li><p><strong>load_alignments</strong> </p></li>
+<li><p><strong>truncate_source</strong> </p></li>
+<li><p><strong>append_source_id</strong> </p></li>
+<li><p><strong>num_buckets</strong> </p></li>
+<li><p><strong>shuffle</strong> </p></li>
+<li><p><strong>pad_to_multiple</strong> </p></li>
+<li><p><strong>prepend_bos_src</strong> </p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="tasks.srp_translation.SRPTranslationConfig">
+<span class="sig-prename descclassname"><span class="pre">tasks.srp_translation.</span></span>
+<span class="sig-name descname"><span class="pre">SRPTranslationConfig</span></span>
+<span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">FairseqDataclass</span></span></em>
+<span class="sig-paren">)</span>
+<a class="headerlink" href="#utils.compression_cal.print_model_parm_nums" title="Link to this definition"></a></dt>
+
+<dd><p>Data configuration for translation tasks.</p>
+
+<dl class="field-list simple">
+<dt class="field-odd">Configurations<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>data (str)</strong> – colon separated path to data directories list, will be iterated upon during epochs in round-robin manner; however, valid and test data are always in the first directory to avoid the need for repeating them in all directories</p></li>
+<li><p><strong>source_lang (str)</strong> – source language</p></li>
+<li><p><strong>target_lang (str)</strong> – target language</p></li>
+<li><p><strong>load_alignments (bool)</strong> – load the binarized alignments</p></li>
+<li><p><strong>left_pad_source (bool)</strong> – pad the source on the left</p></li>
+<li><p><strong>left_pad_target (bool)</strong> – pad the target on the left</p></li>
+<li><p><strong>max_source_positions (int)</strong> – max number of tokens in the source sequence</p></li>
+<li><p><strong>max_target_positions (int)</strong> – max number of tokens in the target sequence</p></li>
+<li><p><strong>upsample_primary (int)</strong> – the amount of upsample primary dataset</p></li>
+<li><p><strong>truncate_source (bool)</strong> – truncate source to max-source-positions</p></li>
+<li><p><strong>num_batch_buckets (int)</strong> – if >0, then bucket source and target lengths into N buckets and pad accordingly; this is useful on TPUs to minimize the number of compilations</p></li>
+<li><p><strong>train_subset (str)</strong> </p></li>
+<li><p><strong>required_seq_len_multiple (int)</strong> </p></li>
+<li><p><strong>eval_bleu (bool)</strong> – evaluation with BLEU scores</p></li>
+<li><p><strong>eval_bleu_args (str)</strong> – generation args for BLUE scoring, e.g., '{"beam": 4, "lenpen": 0.6}', as JSON strin</p></li>
+<li><p><strong>eval_bleu_detok (str)</strong> – detokenize before computing BLEU (e.g., 'moses'); required if using --eval-bleu; use 'space' to disable detokenization; see fairseq.data.encoders for other options</p></li>
+<li><p><strong>eval_bleu_detok_args (str)</strong> – args for building the tokenizer, if needed, as JSON string</p></li>
+<li><p><strong>eval_tokenized_bleu (str)</strong> – compute tokenized BLEU instead of sacrebleu</p></li>
+<li><p><strong>eval_bleu_remove_bpe (str)</strong> – remove BPE before computing BLEU argparse_const: @@ </p></li>
+<li><p><strong>eval_bleu_print_samples (str)</strong> – print sample generations during validation</p></li>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="tasks.srp_translation.SRPTranslationTask">
+<span class="sig-prename descclassname"><span class="pre">tasks.srp_translation.</span></span>
+<span class="sig-name descname"><span class="pre">SRPTranslationTask</span></span>
+<span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">FairseqTask</span></span></em>
+<span class="sig-paren">)</span>
+<a class="headerlink" href="#utils.compression_cal.print_model_parm_nums" title="Link to this definition"></a></dt>
+
+<dd><p>Translate from one (source) language to another (target) language.</p>
+
+<dl class="field-list simple">
+<dt class="field-odd">Functions<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>__init__</strong> – Initialize SRPTranslationTask</p></li>
+<li><p><strong>setup_task</strong> – Setup the task (e.g., load dictionaries)</p></li>
+<li><p><strong>load_dataset</strong> – Load a given dataset split</p></li>
+<li><p><strong>build_dataset_for_inference</strong> – Generate a batched dataset for the given source tokens</p></li>
+<li><p><strong>build_generator</strong> – Build a :class:`~fairseq.SequenceGenerator` instance for this task</p></li>
+<li><p><strong>build_model</strong> – Build a new model instance</p></li>
+<li><p><strong>train_step</strong> – Do forward and backward, and return the loss as computed by *criterion* for the given *model* and *sample*</p></li>
+<li><p><strong>valid_step</strong> – Do forward and return loss, sample size, and logging outputs</p></li>
+<li><p><strong>reduce_metrics</strong> – Aggregate logging outputs from data parallel training</p></li>
+<li><p><strong>max_positions</strong> – Return the max sentence length allowed by the task</p></li>
+<li><p><strong>source_dictionary</strong> – Return the source :class:`~fairseq.data.Dictionary`</p></li>
+<li><p><strong>target_dictionary</strong> – Return the target :class:`~fairseq.data.Dictionary`</p></li>
+<li><p><strong>_inference_with_bleu</strong> – Return the BLUE score</p></li>
+</dd>
+</dl>
+</dd></dl>
+
+
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="train_test.html" class="btn btn-neutral float-left" title="Train and Test" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2023, dmlab.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
